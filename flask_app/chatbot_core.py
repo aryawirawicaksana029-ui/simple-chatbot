@@ -1,9 +1,3 @@
-"""
-chatbot_core.py
-Core logic for ARIA chatbot (Groq + LLaMA 3.3 70B).
-Shared by both the CLI (chatbot.py) and GUI (chatbot_gui.py) versions.
-"""
-
 from groq import Groq
 from config import GROQ_API_KEY
 
