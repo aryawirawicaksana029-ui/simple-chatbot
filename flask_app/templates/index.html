@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ARIA — AI Chatbot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+
+  <div class="page">
+    <div class="terminal-window">
+
+      <!-- Titlebar: mimics the CLI roots of the project -->
+      <div class="titlebar">
+        <div class="dots">
+          <span class="dot dot-red"></span>
+          <span class="dot dot-yellow"></span>
+          <span class="dot dot-green"></span>
+        </div>
+        <div class="titlebar-label">aria@groq: ~/chat</div>
+        <div class="status">
+          <span class="status-pulse"></span>
+          <span>online</span>
+        </div>
+      </div>
+
+      <!-- Header -->
+      <div class="header">
+        <div class="header-avatar">🤖</div>
+        <div class="header-text">
+          <h1>ARIA</h1>
+          <p>AI Chatbot powered by Groq · LLaMA 3.3 70B</p>
+        </div>
+        <button id="clear-btn" class="clear-btn" title="Clear conversation">
+          clear
+        </button>
+      </div>
+
+      <!-- Chat log -->
+      <div id="chat-log" class="chat-log">
+        <div class="msg msg-system">
+          <span class="msg-label">system</span>
+          <p>Halo! Aku Aria 🤖. Ketik pesan di bawah untuk mulai ngobrol.</p>
+        </div>
+      </div>
+
+      <!-- Typing indicator -->
+      <div id="typing-indicator" class="typing-indicator hidden">
+        <span class="msg-label">aria</span>
+        <div class="typing-dots">
+          <span></span><span></span><span></span>
+        </div>
+      </div>
+
+      <!-- Input -->
+      <form id="chat-form" class="chat-form">
+        <span class="prompt-caret">&gt;</span>
+        <input
+          id="chat-input"
+          type="text"
+          autocomplete="off"
+          placeholder="Tulis pesan untuk Aria..."
+          maxlength="2000"
+        />
+        <button type="submit" class="send-btn">Send</button>
+      </form>
+
+    </div>
+
+    <p class="footer-note">Riwayat percakapan disimpan sementara di server selama sesi browser ini aktif.</p>
+  </div>
+
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
