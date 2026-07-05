@@ -2,9 +2,10 @@
 
 An AI Chatbot powered by **Groq API** and **LLaMA 3.3 70B** model. Fast, intelligent, and supports multi-turn conversations with memory.
 
-Now available in two versions:
+Now available in three versions:
 - 🖥️ **Terminal (CLI)** version
 - 🪟 **GUI** version (Tkinter)
+- 🌐 **Web App** version (Flask)
 
 ---
 
@@ -14,8 +15,9 @@ Now available in two versions:
 - ✅ Multi-turn conversation with memory (remembers context)
 - ✅ Supports any language including Bahasa Indonesia
 - ✅ Clear conversation history (`clear` command / "Clear Chat" button)
-- ✅ Clean terminal interface **and** a desktop GUI (Tkinter)
+- ✅ Clean terminal interface, a desktop GUI (Tkinter), **and** a browser-based Web App (Flask)
 - ✅ Non-blocking GUI — API calls run in a background thread
+- ✅ Web App runs per-browser sessions, so multiple users can chat with Aria independently
 - ✅ API key secured via config file (not exposed on GitHub)
 
 ---
@@ -49,6 +51,15 @@ A dark-themed Tkinter chat window with:
 - "Clear Chat" button
 - "Aria sedang mengetik..." indicator while waiting for a response
 
+## 🌐 Preview (Web App)
+
+A browser-based chat page styled like a terminal window:
+- Terminal-style titlebar with an "online" status indicator
+- Color-coded chat bubbles (You / Aria / system / error)
+- Animated typing indicator while Aria is responding
+- "clear" button to reset the conversation
+- Fully responsive — works on desktop and mobile browsers
+
 ---
 
 ## 🛠️ Tech Stack
@@ -58,8 +69,9 @@ A dark-themed Tkinter chat window with:
 | Language | Python 3.x |
 | AI Model | LLaMA 3.3 70B (via Groq) |
 | API | Groq API (free tier) |
-| Libraries | `groq`, `tkinter` (built-in) |
-| Interface | Terminal (CLI) & Desktop GUI (Tkinter) |
+| Libraries | `groq`, `tkinter` (built-in), `flask` |
+| Frontend (Web) | HTML, CSS, vanilla JavaScript (fetch API) |
+| Interface | Terminal (CLI), Desktop GUI (Tkinter), Web App (Flask) |
 
 ---
 
@@ -72,15 +84,25 @@ cd simple-chatbot
 ```
 
 **2. Install dependencies:**
+
+For the CLI / GUI versions (run from the project root):
 ```bash
 pip install groq
 ```
 > Tkinter comes bundled with most Python installations. On some Linux distros you may need `sudo apt install python3-tk`.
 
+For the Web App version (run from inside `flask_app/`):
+```bash
+cd flask_app
+pip install -r requirements.txt
+```
+
 **3. Setup API Key:**
 - Register for free at [Groq Console](https://console.groq.com)
 - Get your API key from **API Keys** section
-- Create a `config.py` file in the project folder:
+- Create a `config.py` file:
+  - in the **project root** (used by `chatbot.py` and `chatbot_gui.py`)
+  - **and** inside `flask_app/` (used by the Web App — it needs its own copy since it imports its own local `chatbot_core.py`)
 ```python
 # config.py
 GROQ_API_KEY = "your_api_key_here"
@@ -99,6 +121,13 @@ GUI version:
 python chatbot_gui.py
 ```
 
+Web App version:
+```bash
+cd flask_app
+python app.py
+```
+Then open **http://127.0.0.1:5000** in your browser.
+
 ---
 
 ## 💬 Commands (CLI)
@@ -116,6 +145,13 @@ python chatbot_gui.py
 | Enter / Send button | Send message to Aria |
 | Clear Chat button | Clear conversation history and chat log |
 
+## 🌐 Controls (Web App)
+
+| Action | Description |
+|--------|-------------|
+| Enter / Send button | Send message to Aria |
+| clear button | Clear conversation history for your browser session |
+
 ---
 
 ## 🧠 How It Works
@@ -131,10 +167,10 @@ Receive AI Response
     ↓
 Add Response to History
     ↓
-Display to User (Terminal or GUI)
+Display to User (Terminal, GUI, or Web App)
 ```
 
-The core chat logic lives in `chatbot_core.py` and is shared by both the CLI and GUI apps, so conversation history and behavior stay consistent across both. In the GUI, the API call runs on a background thread so the window never freezes while waiting for a response.
+The core chat logic lives in `chatbot_core.py` and is shared by the CLI and GUI apps (project root). The Web App has its own copy of `chatbot_core.py` inside `flask_app/`, since it runs as a separate Flask project. In the GUI, the API call runs on a background thread so the window never freezes while waiting for a response. In the Web App, each browser gets its own session (via a session cookie), so multiple people can chat with Aria at the same time without mixing up each other's conversation history.
 
 ---
 
@@ -143,20 +179,30 @@ The core chat logic lives in `chatbot_core.py` and is shared by both the CLI and
 ```
 simple-chatbot/
 │
-├── chatbot_core.py   # Shared core logic (Groq client, history, chat())
-├── chatbot.py         # Terminal (CLI) version
-├── chatbot_gui.py     # GUI version (Tkinter)
-├── .gitignore         # Excludes config.py and __pycache__
-└── README.md          # Project documentation
+├── chatbot_core.py     # Shared core logic (Groq client, history, chat())
+├── chatbot.py          # Terminal (CLI) version
+├── chatbot_gui.py      # GUI version (Tkinter)
+├── flask_app/          # Web App version (Flask)
+│   ├── app.py           # Flask routes (/, /chat, /clear)
+│   ├── chatbot_core.py   # Local copy of the core logic
+│   ├── requirements.txt  # flask, groq
+│   ├── templates/
+│   │   └── index.html
+│   └── static/
+│       ├── style.css
+│       └── script.js
+├── .gitignore          # Excludes config.py and __pycache__
+└── README.md           # Project documentation
 # Not uploaded to GitHub:
-└── config.py          # Groq API key (keep secret!)
+├── config.py           # Groq API key for CLI/GUI (keep secret!)
+└── flask_app/config.py # Groq API key for the Web App (keep secret!)
 ```
 
 ---
 
 ## 🔒 Security Note
 
-The `config.py` file containing your API key is excluded from GitHub via `.gitignore`. Never share or commit your API key publicly — and if it's ever exposed, revoke it right away in the Groq Console.
+Both `config.py` files (project root and `flask_app/`) contain your API key and are excluded from GitHub via `.gitignore`. Never share or commit your API key publicly — and if it's ever exposed, revoke it right away in the Groq Console.
 
 ---
 
@@ -172,7 +218,7 @@ The `config.py` file containing your API key is excluded from GitHub via `.gitig
 ## 🔮 Future Plans
 
 - [x] GUI version with Tkinter
-- [ ] Web App version with Flask
+- [x] Web App version with Flask
 - [ ] Streaming response (word by word like ChatGPT)
 - [ ] Save conversation history to file
 - [ ] Custom AI personality/persona
