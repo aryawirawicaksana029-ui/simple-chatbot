@@ -13,6 +13,7 @@ Now available in three versions:
 
 - ✅ Powered by LLaMA 3.3 70B via Groq API (ultra-fast inference)
 - ✅ Multi-turn conversation with memory (remembers context)
+- ✅ **Streaming responses** — Aria's reply appears word by word in real time, ChatGPT-style, across all three interfaces
 - ✅ Supports any language including Bahasa Indonesia
 - ✅ Clear conversation history (`clear` command / "Clear Chat" button)
 - ✅ Clean terminal interface, a desktop GUI (Tkinter), **and** a browser-based Web App (Flask)
@@ -49,14 +50,14 @@ A dark-themed Tkinter chat window with:
 - Scrollable chat log with color-coded messages (You / Aria / system)
 - Text entry + Send button (or press Enter)
 - "Clear Chat" button
-- "Aria sedang mengetik..." indicator while waiting for a response
+- Aria's reply **streams in word by word** as it's generated, instead of appearing all at once
 
 ## 🌐 Preview (Web App)
 
 A browser-based chat page styled like a terminal window:
 - Terminal-style titlebar with an "online" status indicator
 - Color-coded chat bubbles (You / Aria / system / error)
-- Animated typing indicator while Aria is responding
+- Aria's reply **streams in live**, with a blinking cursor (▍) while it's still typing
 - "clear" button to reset the conversation
 - Fully responsive — works on desktop and mobile browsers
 
@@ -68,9 +69,9 @@ A browser-based chat page styled like a terminal window:
 |-----------|-----------|
 | Language | Python 3.x |
 | AI Model | LLaMA 3.3 70B (via Groq) |
-| API | Groq API (free tier) |
+| API | Groq API (free tier), streaming responses |
 | Libraries | `groq`, `tkinter` (built-in), `flask` |
-| Frontend (Web) | HTML, CSS, vanilla JavaScript (fetch API) |
+| Frontend (Web) | HTML, CSS, vanilla JavaScript (fetch API + ReadableStream) |
 | Interface | Terminal (CLI), Desktop GUI (Tkinter), Web App (Flask) |
 
 ---
@@ -161,16 +162,20 @@ User Input
     ↓
 Add to Conversation History
     ↓
-Send to Groq API (LLaMA 3.3 70B)
+Send to Groq API (LLaMA 3.3 70B, stream=True)
     ↓
-Receive AI Response
+Receive response as a stream of chunks
     ↓
-Add Response to History
+Display each chunk to the user as it arrives (word by word)
     ↓
-Display to User (Terminal, GUI, or Web App)
+Once the stream ends, save the full reply to History
 ```
 
-The core chat logic lives in `chatbot_core.py` and is shared by the CLI and GUI apps (project root). The Web App has its own copy of `chatbot_core.py` inside `flask_app/`, since it runs as a separate Flask project. In the GUI, the API call runs on a background thread so the window never freezes while waiting for a response. In the Web App, each browser gets its own session (via a session cookie), so multiple people can chat with Aria at the same time without mixing up each other's conversation history.
+The core chat logic lives in `chatbot_core.py` and is shared by the CLI and GUI apps (project root). The Web App has its own copy of `chatbot_core.py` inside `flask_app/`, since it runs as a separate Flask project. All three interfaces call `chat_stream()`, which yields Aria's reply piece by piece instead of waiting for the full response:
+
+- **CLI** prints each chunk to the terminal as it arrives.
+- **GUI** streams chunks from a background thread into the Tkinter text widget via `root.after()`, so the window never freezes and text appears to "type itself."
+- **Web App** streams the reply over a chunked HTTP response; the frontend reads it with `ReadableStream` and fills in the chat bubble live, with a blinking cursor while Aria is still "typing." Each browser also gets its own session (via a session cookie), so multiple people can chat with Aria at the same time without mixing up each other's conversation history.
 
 ---
 
@@ -219,7 +224,7 @@ Both `config.py` files (project root and `flask_app/`) contain your API key and 
 
 - [x] GUI version with Tkinter
 - [x] Web App version with Flask
-- [ ] Streaming response (word by word like ChatGPT)
+- [x] Streaming response (word by word like ChatGPT)
 - [ ] Save conversation history to file
 - [ ] Custom AI personality/persona
 - [ ] Voice input and output

@@ -1,7 +1,7 @@
 import os
 import uuid
 
-from flask import Flask, render_template, request, jsonify, session
+from flask import Flask, render_template, request, jsonify, session, Response, stream_with_context
 
 from chatbot_core import AriaChatbot
 
@@ -35,8 +35,19 @@ def index():
     return render_template("index.html")
 
 
+STREAM_ERROR_PREFIX = "__ARIA_STREAM_ERROR__:"
+
+
 @app.route("/chat", methods=["POST"])
 def chat():
+    """
+    Streams Aria's reply back to the browser chunk by chunk (ChatGPT-style),
+    using plain chunked HTTP responses instead of one big JSON blob.
+
+    If something goes wrong *after* streaming has already started, we can't
+    change the HTTP status anymore (headers are already sent), so the error
+    is sent inline with a special prefix that the frontend knows to detect.
+    """
     data = request.get_json(silent=True) or {}
     user_message = (data.get("message") or "").strip()
 
@@ -45,12 +56,14 @@ def chat():
 
     aria = get_chatbot()
 
-    try:
-        reply = aria.chat(user_message)
-    except Exception as e:
-        return jsonify({"error": f"Failed to reach Groq API: {e}"}), 500
+    def generate():
+        try:
+            for chunk in aria.chat_stream(user_message):
+                yield chunk
+        except Exception as e:
+            yield f"{STREAM_ERROR_PREFIX}Failed to reach Groq API: {e}"
 
-    return jsonify({"reply": reply})
+    return Response(stream_with_context(generate()), mimetype="text/plain")
 
 
 @app.route("/clear", methods=["POST"])
