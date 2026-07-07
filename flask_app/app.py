@@ -1,7 +1,11 @@
 import os
 import uuid
+from datetime import datetime
 
-from flask import Flask, render_template, request, jsonify, session, Response, stream_with_context
+from flask import (
+    Flask, render_template, request, jsonify, session,
+    Response, stream_with_context, make_response
+)
 
 from chatbot_core import AriaChatbot
 
@@ -71,6 +75,36 @@ def clear():
     aria = get_chatbot()
     aria.clear_history()
     return jsonify({"status": "cleared"})
+
+
+@app.route("/download")
+def download():
+    """
+    Lets the browser download the current session's conversation as a file.
+    Usage: /download            -> plain text transcript
+           /download?format=json -> structured JSON export
+    """
+    aria = get_chatbot()
+
+    if not aria.has_messages():
+        return jsonify({"error": "No conversation to save yet."}), 400
+
+    fmt = request.args.get("format", "txt").lower()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if fmt == "json":
+        content = aria.export_history_json()
+        filename = f"aria_chat_{timestamp}.json"
+        mimetype = "application/json"
+    else:
+        content = aria.export_history_text()
+        filename = f"aria_chat_{timestamp}.txt"
+        mimetype = "text/plain"
+
+    response = make_response(content)
+    response.headers["Content-Type"] = f"{mimetype}; charset=utf-8"
+    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+    return response
 
 
 if __name__ == "__main__":

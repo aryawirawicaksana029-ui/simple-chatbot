@@ -143,6 +143,11 @@ body {
   color: var(--muted);
 }
 
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .clear-btn {
   font-family: "JetBrains Mono", monospace;
   font-size: 12px;

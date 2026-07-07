@@ -3,6 +3,7 @@ const chatForm = document.getElementById("chat-form");
 const chatInput = document.getElementById("chat-input");
 const sendBtn = chatForm.querySelector(".send-btn");
 const clearBtn = document.getElementById("clear-btn");
+const saveBtn = document.getElementById("save-btn");
 
 const STREAM_ERROR_PREFIX = "__ARIA_STREAM_ERROR__:";
 
@@ -130,6 +131,36 @@ clearBtn.addEventListener("click", async () => {
   chatLog.innerHTML = "";
   appendMessage("system", "✅ Riwayat percakapan sudah dihapus!");
   chatInput.focus();
+});
+
+saveBtn.addEventListener("click", async () => {
+  try {
+    const res = await fetch("/download");
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      appendMessage("error", data.error || "Belum ada percakapan untuk disimpan.");
+      return;
+    }
+
+    // Turn the response into a downloadable file in the browser.
+    const blob = await res.blob();
+    const disposition = res.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename="?([^"]+)"?/);
+    const filename = match ? match[1] : "aria_chat.txt";
+
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+
+    appendMessage("system", `💾 Percakapan disimpan sebagai ${filename}`);
+  } catch (err) {
+    appendMessage("error", "Gagal mengunduh percakapan. Cek koneksi/server Flask kamu.");
+  }
 });
 
 chatInput.focus();
