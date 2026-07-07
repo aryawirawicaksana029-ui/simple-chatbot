@@ -9,6 +9,10 @@ Now available in three versions:
 
 ---
 
+## 📸 Preview on GIFT
+
+<img width="800" height="450" alt="ezgif com-video-to-gif-converter" src="https://github.com/user-attachments/assets/59abb093-5404-43e1-9b59-ddcb969bdd4d" />
+
 ## 🚀 Features
 
 - ✅ Powered by LLaMA 3.3 70B via Groq API (ultra-fast inference)
