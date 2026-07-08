@@ -4,6 +4,7 @@ const chatInput = document.getElementById("chat-input");
 const sendBtn = chatForm.querySelector(".send-btn");
 const clearBtn = document.getElementById("clear-btn");
 const saveBtn = document.getElementById("save-btn");
+const personaSelect = document.getElementById("persona-select");
 
 const STREAM_ERROR_PREFIX = "__ARIA_STREAM_ERROR__:";
 
@@ -164,3 +165,22 @@ saveBtn.addEventListener("click", async () => {
 });
 
 chatInput.focus();
+
+personaSelect.addEventListener("change", async () => {
+  const persona = personaSelect.value;
+  try {
+    const res = await fetch("/persona", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ persona }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      appendMessage("error", data.error || "Gagal mengganti persona.");
+      return;
+    }
+    appendMessage("system", `🎭 Persona diganti ke: ${data.current}`);
+  } catch (err) {
+    appendMessage("error", "Gagal menghubungi server untuk ganti persona.");
+  }
+});

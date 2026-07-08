@@ -1,3 +1,9 @@
+"""
+chatbot_core.py
+Core logic for ARIA chatbot (Groq + LLaMA 3.3 70B).
+Shared by both the CLI (chatbot.py) and GUI (chatbot_gui.py) versions.
+"""
+
 import json
 from datetime import datetime
 
@@ -11,14 +17,52 @@ SYSTEM_PROMPT = (
 
 MODEL_NAME = "llama-3.3-70b-versatile"
 
+# Preset personas. Each value is the system prompt used to steer Aria's style.
+PERSONAS = {
+    "default": SYSTEM_PROMPT,
+    "formal": (
+        "You are Aria, a professional and formal AI assistant. "
+        "Always respond with precise, well-structured, businesslike language. Avoid slang and emoji."
+    ),
+    "santai": (
+        "Kamu adalah Aria, asisten AI yang santai, gaul, dan ramah. "
+        "Boleh pakai bahasa sehari-hari, singkatan, dan emoji secukupnya, tapi tetap membantu dan jelas."
+    ),
+    "sarcastic": (
+        "You are Aria, a witty assistant with a sharp, sarcastic sense of humor. "
+        "Tease the user a little, but always give a genuinely correct and helpful answer underneath the snark."
+    ),
+    "mentor": (
+        "You are Aria, a patient and encouraging mentor. "
+        "Explain things step by step, check understanding, and motivate the user like a supportive teacher."
+    ),
+}
+
 
 class AriaChatbot:
     """Wraps the Groq client and keeps conversation history."""
 
-    def __init__(self, api_key: str = GROQ_API_KEY, model: str = MODEL_NAME):
+    def __init__(self, api_key: str = GROQ_API_KEY, model: str = MODEL_NAME, persona: str = "default"):
         self.client = Groq(api_key=api_key)
         self.model = model
         self.conversation_history = []
+        self.persona_name = "custom"
+        self.system_prompt = SYSTEM_PROMPT
+        self.set_persona(persona)
+
+    def set_persona(self, persona) -> str:
+        """
+        Switch Aria's personality.
+        `persona` can be a preset key from PERSONAS (e.g. "formal", "santai")
+        or any custom system-prompt text. Returns the resulting system prompt.
+        """
+        if persona in PERSONAS:
+            self.persona_name = persona
+            self.system_prompt = PERSONAS[persona]
+        else:
+            self.persona_name = "custom"
+            self.system_prompt = persona
+        return self.system_prompt
 
     def chat(self, user_message: str) -> str:
         """Send a user message to Groq and return Aria's full reply (no streaming)."""
@@ -40,7 +84,7 @@ class AriaChatbot:
         stream = self.client.chat.completions.create(
             model=self.model,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT}
+                {"role": "system", "content": self.system_prompt}
             ] + self.conversation_history,
             stream=True,
         )

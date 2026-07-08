@@ -1,3 +1,12 @@
+"""
+app.py
+Flask Web App version of ARIA chatbot.
+
+Run with:
+    python app.py
+Then open http://127.0.0.1:5000 in your browser.
+"""
+
 import os
 import uuid
 from datetime import datetime
@@ -7,7 +16,7 @@ from flask import (
     Response, stream_with_context, make_response
 )
 
-from chatbot_core import AriaChatbot
+from chatbot_core import AriaChatbot, PERSONAS
 
 app = Flask(__name__)
 # Secret key for signing the session cookie (session only stores a session_id,
@@ -75,6 +84,23 @@ def clear():
     aria = get_chatbot()
     aria.clear_history()
     return jsonify({"status": "cleared"})
+
+
+@app.route("/persona", methods=["GET", "POST"])
+def persona():
+    aria = get_chatbot()
+
+    if request.method == "GET":
+        return jsonify({"current": aria.persona_name, "available": list(PERSONAS.keys())})
+
+    data = request.get_json(silent=True) or {}
+    new_persona = (data.get("persona") or "").strip()
+
+    if not new_persona:
+        return jsonify({"error": "Persona can't be empty."}), 400
+
+    aria.set_persona(new_persona)
+    return jsonify({"current": aria.persona_name})
 
 
 @app.route("/download")

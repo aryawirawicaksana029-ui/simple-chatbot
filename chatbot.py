@@ -1,7 +1,12 @@
+"""
+chatbot.py
+Terminal (CLI) version of ARIA chatbot.
+"""
+
 import os
 from datetime import datetime
 
-from chatbot_core import AriaChatbot
+from chatbot_core import AriaChatbot, PERSONAS
 
 aria = AriaChatbot()
 
@@ -25,6 +30,7 @@ def main():
     print("  Type 'clear' to clear history")
     print("  Type 'save' to save conversation to a .txt file")
     print("  Type 'save json' to save conversation to a .json file")
+    print(f"  Type 'persona' to list personas, 'persona <name>' to switch (current: {aria.persona_name})")
     print("=" * 45)
 
     while True:
@@ -50,6 +56,17 @@ def main():
             fmt = "json" if user_input.lower() == "save json" else "txt"
             filepath = save_history_to_file(fmt)
             print(f"\n💾 Conversation saved to: {filepath}")
+            continue
+
+        if user_input.lower() == "persona":
+            print(f"\n🎭 Persona aktif: {aria.persona_name}")
+            print("Pilihan tersedia:", ", ".join(PERSONAS.keys()))
+            continue
+
+        if user_input.lower().startswith("persona "):
+            new_persona = user_input[len("persona "):].strip()
+            aria.set_persona(new_persona)
+            print(f"\n🎭 Persona diganti ke: {aria.persona_name}")
             continue
 
         print("\nAria: ", end="", flush=True)

@@ -1,9 +1,17 @@
+"""
+chatbot_gui.py
+GUI version of ARIA chatbot using Tkinter.
+
+Run with:
+    python chatbot_gui.py
+"""
+
 import threading
 import tkinter as tk
-from tkinter import scrolledtext, messagebox, filedialog
+from tkinter import ttk, scrolledtext, messagebox, filedialog
 from datetime import datetime
 
-from chatbot_core import AriaChatbot
+from chatbot_core import AriaChatbot, PERSONAS
 
 # ---------- Colors & Fonts ----------
 BG_COLOR = "#1e1f29"
@@ -44,6 +52,15 @@ class AriaGUI:
             font=FONT_TITLE, bg=BG_COLOR, fg=TEXT_COLOR
         )
         title.pack(side="left")
+
+        self.persona_var = tk.StringVar(value=self.aria.persona_name)
+        persona_menu = ttk.Combobox(
+            header, textvariable=self.persona_var,
+            values=list(PERSONAS.keys()), state="readonly", width=10,
+            font=FONT_MAIN
+        )
+        persona_menu.pack(side="left", padx=(12, 0))
+        persona_menu.bind("<<ComboboxSelected>>", self.change_persona)
 
         clear_btn = tk.Button(
             header, text="Clear Chat", command=self.clear_chat,
@@ -185,6 +202,11 @@ class AriaGUI:
             end = f"1.0+{idx + len(marker)}c"
             self.chat_area.delete(start, end)
         self.chat_area.configure(state="disabled")
+
+    def change_persona(self, event=None):
+        selected = self.persona_var.get()
+        self.aria.set_persona(selected)
+        self._append_system(f"🎭 Persona diganti ke: {self.aria.persona_name}")
 
     def clear_chat(self):
         self.aria.clear_history()
