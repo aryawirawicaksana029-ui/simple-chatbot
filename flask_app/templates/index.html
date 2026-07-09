@@ -42,6 +42,9 @@
             <option value="sarcastic">sarcastic</option>
             <option value="mentor">mentor</option>
           </select>
+          <button id="speak-toggle-btn" class="clear-btn" title="Toggle Aria membacakan balasan dengan suara">
+            🔇 speak
+          </button>
           <button id="save-btn" class="clear-btn" title="Download conversation as .txt">
             💾 save
           </button>
@@ -62,6 +65,7 @@
       <!-- Input -->
       <form id="chat-form" class="chat-form">
         <span class="prompt-caret">&gt;</span>
+        <button type="button" id="mic-btn" class="mic-btn" title="Rekam pesan suara (5 detik)">🎤</button>
         <input
           id="chat-input"
           type="text"

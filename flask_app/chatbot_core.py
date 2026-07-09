@@ -16,6 +16,7 @@ SYSTEM_PROMPT = (
 )
 
 MODEL_NAME = "llama-3.3-70b-versatile"
+WHISPER_MODEL = "whisper-large-v3"  # Groq's hosted speech-to-text model
 
 # Preset personas. Each value is the system prompt used to steer Aria's style.
 PERSONAS = {
@@ -100,6 +101,28 @@ class AriaChatbot:
             "role": "assistant",
             "content": full_reply
         })
+
+    def transcribe_audio(self, filepath: str, language: str = None) -> str:
+        """
+        Transcribe an audio file (wav, mp3, m4a, webm, etc.) to text using
+        Groq's hosted Whisper model.
+
+        `language` is an optional ISO-639-1 code (e.g. "id" for Indonesian,
+        "en" for English). Leaving it as None lets Whisper auto-detect the
+        language, which works well enough for mixed Indonesian/English speech.
+
+        Returns the transcribed text (empty string if nothing was recognized).
+        """
+        with open(filepath, "rb") as audio_file:
+            transcription = self.client.audio.transcriptions.create(
+                file=(filepath, audio_file.read()),
+                model=WHISPER_MODEL,
+                language=language,
+                response_format="text",
+            )
+        # The SDK sometimes returns a plain string, sometimes an object with
+        # a .text attribute depending on response_format — handle both.
+        return transcription if isinstance(transcription, str) else transcription.text
 
     def clear_history(self):
         self.conversation_history.clear()

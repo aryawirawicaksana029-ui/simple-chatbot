@@ -20,6 +20,8 @@ Now available in three versions:
 - ✅ **Streaming responses** — Aria's reply appears word by word in real time, ChatGPT-style, across all three interfaces
 - ✅ **Save conversation history to file** — export as a readable `.txt` transcript or structured `.json`, from every interface
 - ✅ **Custom AI personality/persona** — switch Aria's tone between `default`, `formal`, `santai`, `sarcastic`, or `mentor` (or set your own custom prompt), on the fly
+- ✅ **Voice input** — speak to Aria instead of typing; audio is transcribed via Groq's Whisper (`whisper-large-v3`), across all three interfaces
+- ✅ **Voice output** — Aria can read her replies aloud: browser `speechSynthesis` on the Web App, offline `pyttsx3` on CLI/GUI
 - ✅ Supports any language including Bahasa Indonesia
 - ✅ Clear conversation history (`clear` command / "Clear Chat" button)
 - ✅ Clean terminal interface, a desktop GUI (Tkinter), **and** a browser-based Web App (Flask)
@@ -94,9 +96,10 @@ cd simple-chatbot
 
 For the CLI / GUI versions (run from the project root):
 ```bash
-pip install groq
+pip install -r requirements.txt
 ```
 > Tkinter comes bundled with most Python installations. On some Linux distros you may need `sudo apt install python3-tk`.
+> `sounddevice` needs a working system audio backend (PortAudio) — it's bundled on Windows/macOS; on Linux you may need `sudo apt install libportaudio2`.
 
 For the Web App version (run from inside `flask_app/`):
 ```bash
@@ -146,6 +149,8 @@ Then open **http://127.0.0.1:5000** in your browser.
 | `save` / `save json` | Save conversation to `chat_history/` as `.txt` or `.json` |
 | `persona` | List available personas |
 | `persona <name>` | Switch persona (`default`, `formal`, `santai`, `sarcastic`, `mentor`, or any custom text) |
+| `voice` | Record 5 seconds of audio and transcribe it as your message |
+| `speak on` / `speak off` | Toggle Aria reading her replies aloud (offline, via pyttsx3) |
 | `quit` / `exit` | Exit the chatbot |
 
 ## 🖱️ Controls (GUI)
@@ -155,6 +160,8 @@ Then open **http://127.0.0.1:5000** in your browser.
 | Enter / Send button | Send message to Aria |
 | Persona dropdown | Switch Aria's personality on the fly |
 | 💾 Save button | Save conversation as `.txt` or `.json` via a file dialog |
+| 🎤 Mic button | Record 5 seconds of audio, transcribe it into the entry box (review before sending) |
+| 🔇/🔊 Speak button | Toggle Aria reading her replies aloud (offline, via pyttsx3) |
 | Clear Chat button | Clear conversation history and chat log |
 
 ## 🌐 Controls (Web App)
@@ -164,6 +171,8 @@ Then open **http://127.0.0.1:5000** in your browser.
 | Enter / Send button | Send message to Aria |
 | Persona dropdown | Switch Aria's personality for your session |
 | 💾 save button | Download the conversation as a `.txt` file |
+| 🎤 mic button | Record a voice message; it's transcribed server-side via Groq Whisper and dropped into the input box |
+| 🔇/🔊 speak button | Toggle Aria reading her replies aloud, using the browser's built-in speechSynthesis |
 | clear button | Clear conversation history for your browser session |
 
 ---
@@ -190,6 +199,10 @@ The core chat logic lives in `chatbot_core.py` and is shared by the CLI and GUI 
 - **GUI** streams chunks from a background thread into the Tkinter text widget via `root.after()`, so the window never freezes and text appears to "type itself."
 - **Web App** streams the reply over a chunked HTTP response; the frontend reads it with `ReadableStream` and fills in the chat bubble live, with a blinking cursor while Aria is still "typing." Each browser also gets its own session (via a session cookie), so multiple people can chat with Aria at the same time without mixing up each other's conversation history.
 
+**Voice input** works the same way conceptually across all three: record audio → send it to Groq's Whisper model (`whisper-large-v3`) via `transcribe_audio()` → get text back → treat it exactly like a typed message. The CLI/GUI record from the system mic with `sounddevice`; the Web App records in the browser with the `MediaRecorder` API and POSTs the audio blob to a `/transcribe` endpoint.
+
+**Voice output** deliberately uses two different engines depending on environment: the Web App speaks replies with the browser's built-in `speechSynthesis` (free, client-side, zero extra dependencies), while the CLI and GUI — which have no browser — use `pyttsx3`, an offline Python TTS engine, so neither needs an API call or an internet connection to talk back.
+
 ---
 
 ## 📁 Project Structure
@@ -197,18 +210,21 @@ The core chat logic lives in `chatbot_core.py` and is shared by the CLI and GUI 
 ```
 simple-chatbot/
 │
-├── chatbot_core.py     # Shared core logic (Groq client, history, chat())
+├── chatbot_core.py     # Shared core logic (Groq client, history, chat(), transcribe_audio())
 ├── chatbot.py          # Terminal (CLI) version
 ├── chatbot_gui.py      # GUI version (Tkinter)
+├── voice_input.py      # Mic recording helper (CLI/GUI only, uses sounddevice)
+├── voice_output.py     # Offline text-to-speech helper (CLI/GUI only, uses pyttsx3)
+├── requirements.txt    # groq, sounddevice, scipy, pyttsx3
 ├── flask_app/          # Web App version (Flask)
-│   ├── app.py           # Flask routes (/, /chat, /clear)
+│   ├── app.py           # Flask routes (/, /chat, /clear, /persona, /download, /transcribe)
 │   ├── chatbot_core.py   # Local copy of the core logic
 │   ├── requirements.txt  # flask, groq
 │   ├── templates/
 │   │   └── index.html
 │   └── static/
 │       ├── style.css
-│       └── script.js
+│       └── script.js       # includes MediaRecorder (voice input) + speechSynthesis (voice output)
 ├── .gitignore          # Excludes config.py and __pycache__
 └── README.md           # Project documentation
 # Not uploaded to GitHub:
@@ -240,5 +256,5 @@ Both `config.py` files (project root and `flask_app/`) contain your API key and 
 - [x] Streaming response (word by word like ChatGPT)
 - [x] Save conversation history to file
 - [x] Custom AI personality/persona
-- [ ] Voice input and output
+- [x] Voice input and output
 - [ ] RAG (Retrieval Augmented Generation) support

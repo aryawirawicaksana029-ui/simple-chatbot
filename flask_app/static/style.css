@@ -305,6 +305,33 @@ body {
   color: var(--muted);
 }
 
+.mic-btn {
+  font-size: 15px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.mic-btn:hover {
+  border-color: var(--aria);
+}
+
+.mic-btn.recording {
+  background: rgba(248, 113, 113, 0.15);
+  border-color: var(--danger);
+  color: var(--danger);
+  animation: pulse 1s infinite;
+}
+
+.mic-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .send-btn {
   font-family: "Space Grotesk", sans-serif;
   font-weight: 600;

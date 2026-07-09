@@ -1,2 +1,4 @@
-flask
 groq
+sounddevice
+scipy
+pyttsx3

@@ -5,8 +5,98 @@ const sendBtn = chatForm.querySelector(".send-btn");
 const clearBtn = document.getElementById("clear-btn");
 const saveBtn = document.getElementById("save-btn");
 const personaSelect = document.getElementById("persona-select");
+const micBtn = document.getElementById("mic-btn");
+const speakToggleBtn = document.getElementById("speak-toggle-btn");
 
 const STREAM_ERROR_PREFIX = "__ARIA_STREAM_ERROR__:";
+
+// ---------- Voice output (browser speechSynthesis) ----------
+let speakEnabled = false;
+
+speakToggleBtn.addEventListener("click", () => {
+  speakEnabled = !speakEnabled;
+  speakToggleBtn.textContent = speakEnabled ? "🔊 speak" : "🔇 speak";
+  if (!speakEnabled) {
+    window.speechSynthesis.cancel(); // stop mid-sentence if turned off
+  }
+});
+
+function speakText(text) {
+  if (!speakEnabled || !text.trim()) return;
+  window.speechSynthesis.cancel(); // avoid overlapping utterances
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "id-ID"; // falls back to a default voice if unavailable
+  window.speechSynthesis.speak(utterance);
+}
+
+// ---------- Voice input (MediaRecorder -> /transcribe) ----------
+let mediaRecorder = null;
+let audioChunks = [];
+let isRecording = false;
+
+async function startRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioChunks = [];
+    mediaRecorder = new MediaRecorder(stream);
+
+    mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach((track) => track.stop());
+      const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+      await sendAudioForTranscription(audioBlob);
+    };
+
+    mediaRecorder.start();
+    isRecording = true;
+    micBtn.textContent = "⏺";
+    micBtn.classList.add("recording");
+  } catch (err) {
+    appendMessage("error", "Tidak bisa mengakses mikrofon. Pastikan izin mikrofon diaktifkan di browser.");
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder && isRecording) {
+    mediaRecorder.stop();
+    isRecording = false;
+    micBtn.textContent = "🎤";
+    micBtn.classList.remove("recording");
+  }
+}
+
+async function sendAudioForTranscription(audioBlob) {
+  micBtn.disabled = true;
+  appendMessage("system", "🎙️ Mentranskripsi suara...");
+
+  const formData = new FormData();
+  formData.append("audio", audioBlob, "recording.webm");
+
+  try {
+    const res = await fetch("/transcribe", { method: "POST", body: formData });
+    const data = await res.json();
+
+    if (!res.ok) {
+      appendMessage("error", data.error || "Gagal mentranskripsi suara.");
+      return;
+    }
+
+    chatInput.value = (data.text || "").trim();
+    chatInput.focus();
+  } catch (err) {
+    appendMessage("error", "Gagal menghubungi server untuk transkripsi.");
+  } finally {
+    micBtn.disabled = false;
+  }
+}
+
+micBtn.addEventListener("click", () => {
+  if (isRecording) {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+});
 
 function appendMessage(role, text) {
   const msg = document.createElement("div");
@@ -103,6 +193,7 @@ async function sendMessage(message) {
       appendMessage("error", fullText.replace(STREAM_ERROR_PREFIX, ""));
     } else {
       finalizeAriaStreamBubble(bubble, fullText);
+      speakText(fullText);
     }
   } catch (err) {
     bubble.closest(".msg").remove();

@@ -9,6 +9,7 @@ Then open http://127.0.0.1:5000 in your browser.
 
 import os
 import uuid
+import tempfile
 from datetime import datetime
 
 from flask import (
@@ -84,6 +85,40 @@ def clear():
     aria = get_chatbot()
     aria.clear_history()
     return jsonify({"status": "cleared"})
+
+
+@app.route("/transcribe", methods=["POST"])
+def transcribe():
+    """
+    Accepts an audio recording captured in the browser (via the
+    MediaRecorder API) and returns its transcription using Groq's
+    hosted Whisper model.
+
+    Note: text-to-speech (Aria talking back) is handled entirely on the
+    client with the browser's speechSynthesis API — no endpoint needed
+    for that direction, only for speech-to-text.
+    """
+    if "audio" not in request.files:
+        return jsonify({"error": "No audio file received."}), 400
+
+    audio_file = request.files["audio"]
+    aria = get_chatbot()
+
+    # Groq's SDK expects a filesystem path / bytes, not a raw Flask
+    # FileStorage object, so we save the upload to a temp file first.
+    suffix = os.path.splitext(audio_file.filename or "audio.webm")[1] or ".webm"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        audio_file.save(tmp.name)
+        tmp_path = tmp.name
+
+    try:
+        text = aria.transcribe_audio(tmp_path)
+    except Exception as e:
+        return jsonify({"error": f"Failed to transcribe audio: {e}"}), 500
+    finally:
+        os.remove(tmp_path)
+
+    return jsonify({"text": text})
 
 
 @app.route("/persona", methods=["GET", "POST"])

@@ -12,6 +12,8 @@ from tkinter import ttk, scrolledtext, messagebox, filedialog
 from datetime import datetime
 
 from chatbot_core import AriaChatbot, PERSONAS
+from voice_input import record_audio
+import voice_output
 
 # ---------- Colors & Fonts ----------
 BG_COLOR = "#1e1f29"
@@ -38,6 +40,8 @@ class AriaGUI:
 
         self.aria = AriaChatbot()
         self.is_waiting = False
+        self.is_recording = False
+        self.speak_enabled = False  # toggled via the 🔇/🔊 Speak button
 
         self._build_ui()
 
@@ -78,6 +82,14 @@ class AriaGUI:
         )
         save_btn.pack(side="right", padx=(0, 8))
 
+        self.speak_btn = tk.Button(
+            header, text="🔇 Speak", command=self.toggle_speak,
+            bg=BTN_COLOR, fg=TEXT_COLOR, font=FONT_MAIN,
+            activebackground=BTN_HOVER, relief="flat", padx=10, pady=3,
+            cursor="hand2"
+        )
+        self.speak_btn.pack(side="right", padx=(0, 8))
+
         # Chat display area
         self.chat_area = scrolledtext.ScrolledText(
             self.root, wrap=tk.WORD, state="disabled",
@@ -95,6 +107,14 @@ class AriaGUI:
         # Input area
         input_frame = tk.Frame(self.root, bg=BG_COLOR)
         input_frame.pack(fill="x", padx=15, pady=(0, 15))
+
+        self.mic_btn = tk.Button(
+            input_frame, text="🎤", command=self.toggle_recording,
+            bg=BTN_COLOR, fg=TEXT_COLOR, font=FONT_MAIN,
+            activebackground=BTN_HOVER, relief="flat", padx=10, pady=6,
+            cursor="hand2"
+        )
+        self.mic_btn.pack(side="left", padx=(0, 8))
 
         self.entry = tk.Entry(
             input_frame, font=FONT_MAIN, bg=ENTRY_BG, fg=TEXT_COLOR,
@@ -151,15 +171,17 @@ class AriaGUI:
 
     def _stream_response(self, user_text):
         started = False
+        full_reply = ""
         try:
             for chunk in self.aria.chat_stream(user_text):
+                full_reply += chunk
                 if not started:
                     self.root.after(0, self._start_aria_message)
                     started = True
                 self.root.after(0, self._append_stream_chunk, chunk)
-            self.root.after(0, self._finish_stream, None)
+            self.root.after(0, self._finish_stream, None, full_reply)
         except Exception as e:
-            self.root.after(0, self._finish_stream, str(e))
+            self.root.after(0, self._finish_stream, str(e), full_reply)
 
     def _start_aria_message(self):
         """Called once, right when the first chunk of Aria's reply arrives."""
@@ -174,7 +196,7 @@ class AriaGUI:
         self.chat_area.configure(state="disabled")
         self.chat_area.see(tk.END)
 
-    def _finish_stream(self, error_msg):
+    def _finish_stream(self, error_msg, full_reply=""):
         # Safe to call even if the "mengetik..." line was already removed
         # (e.g. the request failed before any chunk arrived).
         self._remove_last_system_line()
@@ -186,6 +208,11 @@ class AriaGUI:
             self.chat_area.insert(tk.END, "\n\n")
             self.chat_area.configure(state="disabled")
             self.chat_area.see(tk.END)
+
+            if self.speak_enabled and full_reply.strip():
+                # pyttsx3's runAndWait() blocks, so speak on a background
+                # thread to keep the GUI responsive.
+                threading.Thread(target=voice_output.speak, args=(full_reply,), daemon=True).start()
 
         self.is_waiting = False
         self.send_btn.configure(state="normal", text="Send")
@@ -202,6 +229,48 @@ class AriaGUI:
             end = f"1.0+{idx + len(marker)}c"
             self.chat_area.delete(start, end)
         self.chat_area.configure(state="disabled")
+
+    def toggle_speak(self):
+        self.speak_enabled = not self.speak_enabled
+        label = "🔊 Speak" if self.speak_enabled else "🔇 Speak"
+        self.speak_btn.configure(text=label)
+
+    def toggle_recording(self):
+        if self.is_waiting or self.is_recording:
+            return  # ignore clicks while already busy
+
+        self.is_recording = True
+        self.mic_btn.configure(state="disabled", text="⏺")
+        self._append_system("🎙️ Merekam suara selama 5 detik... silakan bicara!")
+
+        threading.Thread(target=self._record_and_transcribe, daemon=True).start()
+
+    def _record_and_transcribe(self):
+        import os
+        try:
+            filepath = record_audio(duration=5.0)
+            text = self.aria.transcribe_audio(filepath)
+            os.remove(filepath)
+            self.root.after(0, self._on_voice_transcribed, text, None)
+        except Exception as e:
+            self.root.after(0, self._on_voice_transcribed, None, str(e))
+
+    def _on_voice_transcribed(self, text, error):
+        self.is_recording = False
+        self.mic_btn.configure(state="normal", text="🎤")
+
+        if error:
+            messagebox.showerror("Error", f"Gagal transkripsi suara:\n{error}")
+            return
+
+        if text and text.strip():
+            self.entry.delete(0, tk.END)
+            self.entry.insert(0, text.strip())
+            self._append_system(f'🎙️ Transkrip: "{text.strip()}" — tekan Enter/Send untuk mengirim.')
+        else:
+            self._append_system("⚠️ Tidak ada suara yang terdengar, coba lagi.")
+
+        self.entry.focus()
 
     def change_persona(self, event=None):
         selected = self.persona_var.get()
