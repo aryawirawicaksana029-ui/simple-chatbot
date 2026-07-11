@@ -58,6 +58,9 @@ def main():
     print(f"  Type 'persona' to list personas, 'persona <name>' to switch (current: {aria.persona_name})")
     print("  Type 'voice' to record a spoken message instead of typing")
     print("  Type 'speak on' / 'speak off' to toggle Aria reading replies aloud")
+    print("  Type 'rag add <filepath>' to add a .txt/.pdf/.docx file to Aria's knowledge base")
+    print("  Type 'rag on' / 'rag off' to toggle whether Aria uses the knowledge base")
+    print("  Type 'rag list' to see loaded documents, 'rag clear' to wipe the knowledge base")
     print("=" * 45)
 
     while True:
@@ -100,6 +103,43 @@ def main():
             speak_enabled = user_input.lower() == "speak on"
             status = "🔊 ON" if speak_enabled else "🔇 OFF"
             print(f"\n🗣️  Text-to-speech: {status}")
+            continue
+
+        if user_input.lower() in ["rag on", "rag off"]:
+            if user_input.lower() == "rag on":
+                aria.enable_rag()
+            else:
+                aria.disable_rag()
+            status = "🔊 ON" if aria.rag_enabled else "🔇 OFF"
+            print(f"\n📚 RAG (knowledge base): {status}")
+            continue
+
+        if user_input.lower() == "rag list":
+            docs = aria.list_kb_documents()
+            if docs:
+                print(f"\n📚 Dokumen di knowledge base ({len(docs)}):")
+                for doc in docs:
+                    print(f"   - {doc}")
+            else:
+                print("\n📚 Knowledge base masih kosong.")
+            continue
+
+        if user_input.lower() == "rag clear":
+            aria.clear_kb()
+            print("\n🗑️  Knowledge base sudah dikosongkan.")
+            continue
+
+        if user_input.lower().startswith("rag add "):
+            filepath = user_input[len("rag add "):].strip().strip('"')
+            if not os.path.isfile(filepath):
+                print(f"\n⚠️  File tidak ditemukan: {filepath}")
+                continue
+            try:
+                print("\n📚 Memproses dokumen (embedding bisa makan waktu beberapa detik)...")
+                chunk_count = aria.add_document_to_kb(filepath)
+                print(f"✅ Ditambahkan: {os.path.basename(filepath)} ({chunk_count} chunks)")
+            except Exception as e:
+                print(f"\n⚠️  Gagal memproses dokumen: {e}")
             continue
 
         if user_input.lower() == "voice":

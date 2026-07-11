@@ -22,6 +22,7 @@ Now available in three versions:
 - ✅ **Custom AI personality/persona** — switch Aria's tone between `default`, `formal`, `santai`, `sarcastic`, or `mentor` (or set your own custom prompt), on the fly
 - ✅ **Voice input** — speak to Aria instead of typing; audio is transcribed via Groq's Whisper (`whisper-large-v3`), across all three interfaces
 - ✅ **Voice output** — Aria can read her replies aloud: browser `speechSynthesis` on the Web App, offline `pyttsx3` on CLI/GUI
+- ✅ **RAG (Retrieval Augmented Generation)** — upload `.txt`/`.pdf`/`.docx` documents to a shared knowledge base (ChromaDB + local `sentence-transformers` embeddings); toggle it on to have Aria answer using your documents as context
 - ✅ Supports any language including Bahasa Indonesia
 - ✅ Clear conversation history (`clear` command / "Clear Chat" button)
 - ✅ Clean terminal interface, a desktop GUI (Tkinter), **and** a browser-based Web App (Flask)
@@ -100,6 +101,7 @@ pip install -r requirements.txt
 ```
 > Tkinter comes bundled with most Python installations. On some Linux distros you may need `sudo apt install python3-tk`.
 > `sounddevice` needs a working system audio backend (PortAudio) — it's bundled on Windows/macOS; on Linux you may need `sudo apt install libportaudio2`.
+> `sentence-transformers` downloads its embedding model (~80MB) the first time it runs, then caches it locally — the first document you add or first RAG-enabled message may take a bit longer.
 
 For the Web App version (run from inside `flask_app/`):
 ```bash
@@ -151,6 +153,10 @@ Then open **http://127.0.0.1:5000** in your browser.
 | `persona <name>` | Switch persona (`default`, `formal`, `santai`, `sarcastic`, `mentor`, or any custom text) |
 | `voice` | Record 5 seconds of audio and transcribe it as your message |
 | `speak on` / `speak off` | Toggle Aria reading her replies aloud (offline, via pyttsx3) |
+| `rag add <filepath>` | Add a `.txt`/`.pdf`/`.docx` file to Aria's knowledge base |
+| `rag on` / `rag off` | Toggle whether Aria uses the knowledge base to answer |
+| `rag list` | List documents currently in the knowledge base |
+| `rag clear` | Wipe the entire knowledge base |
 | `quit` / `exit` | Exit the chatbot |
 
 ## 🖱️ Controls (GUI)
@@ -162,6 +168,8 @@ Then open **http://127.0.0.1:5000** in your browser.
 | 💾 Save button | Save conversation as `.txt` or `.json` via a file dialog |
 | 🎤 Mic button | Record 5 seconds of audio, transcribe it into the entry box (review before sending) |
 | 🔇/🔊 Speak button | Toggle Aria reading her replies aloud (offline, via pyttsx3) |
+| 📎 Add Doc button | Upload a `.txt`/`.pdf`/`.docx` file to the knowledge base via a file dialog |
+| 📚 RAG button | Toggle whether Aria uses the knowledge base to answer |
 | Clear Chat button | Clear conversation history and chat log |
 
 ## 🌐 Controls (Web App)
@@ -173,6 +181,8 @@ Then open **http://127.0.0.1:5000** in your browser.
 | 💾 save button | Download the conversation as a `.txt` file |
 | 🎤 mic button | Record a voice message; it's transcribed server-side via Groq Whisper and dropped into the input box |
 | 🔇/🔊 speak button | Toggle Aria reading her replies aloud, using the browser's built-in speechSynthesis |
+| 📎 upload button | Upload a `.txt`/`.pdf`/`.docx` file to the shared knowledge base |
+| 📚 rag button | Toggle whether Aria uses the knowledge base for your session |
 | clear button | Clear conversation history for your browser session |
 
 ---
@@ -203,6 +213,8 @@ The core chat logic lives in `chatbot_core.py` and is shared by the CLI and GUI 
 
 **Voice output** deliberately uses two different engines depending on environment: the Web App speaks replies with the browser's built-in `speechSynthesis` (free, client-side, zero extra dependencies), while the CLI and GUI — which have no browser — use `pyttsx3`, an offline Python TTS engine, so neither needs an API call or an internet connection to talk back.
 
+**RAG** works like this: uploaded documents (`.txt`/`.pdf`/`.docx`) are split into ~500-character chunks, each chunk is turned into a vector with a local `sentence-transformers` model (`all-MiniLM-L6-v2` — Groq doesn't host embedding models, only chat/Whisper/TTS), and stored in a persistent ChromaDB collection. When RAG is toggled on, every user message is first embedded and matched against that collection; the top 3 most relevant chunks are injected as extra context in the system prompt before the request goes to Groq. The knowledge base is intentionally **shared and persistent across the whole app** — unlike conversation history, which is per-session — since it represents documents Aria "knows about" globally, not something tied to one particular chat.
+
 ---
 
 ## 📁 Project Structure
@@ -215,18 +227,21 @@ simple-chatbot/
 ├── chatbot_gui.py      # GUI version (Tkinter)
 ├── voice_input.py      # Mic recording helper (CLI/GUI only, uses sounddevice)
 ├── voice_output.py     # Offline text-to-speech helper (CLI/GUI only, uses pyttsx3)
-├── requirements.txt    # groq, sounddevice, scipy, pyttsx3
+├── rag_utils.py         # RAG knowledge base (ChromaDB + sentence-transformers)
+├── requirements.txt    # groq, sounddevice, scipy, pyttsx3, chromadb, sentence-transformers, pypdf, python-docx
 ├── flask_app/          # Web App version (Flask)
-│   ├── app.py           # Flask routes (/, /chat, /clear, /persona, /download, /transcribe)
+│   ├── app.py           # Flask routes (/, /chat, /clear, /persona, /download, /transcribe, /rag/*)
 │   ├── chatbot_core.py   # Local copy of the core logic
-│   ├── requirements.txt  # flask, groq
+│   ├── rag_utils.py      # Local copy of the RAG knowledge base logic
+│   ├── requirements.txt  # flask, groq, chromadb, sentence-transformers, pypdf, python-docx
 │   ├── templates/
 │   │   └── index.html
 │   └── static/
 │       ├── style.css
-│       └── script.js       # includes MediaRecorder (voice input) + speechSynthesis (voice output)
-├── .gitignore          # Excludes config.py and __pycache__
-└── README.md           # Project documentation
+│       └── script.js       # includes MediaRecorder (voice input) + speechSynthesis (voice output) + RAG upload/toggle
+├── knowledge_base/      # ChromaDB persisted data (auto-created, git-ignored)
+├── .gitignore          # Excludes config.py, __pycache__, knowledge_base/, chat_history/
+└── README.md            # Project documentation
 # Not uploaded to GitHub:
 ├── config.py           # Groq API key for CLI/GUI (keep secret!)
 └── flask_app/config.py # Groq API key for the Web App (keep secret!)
@@ -257,4 +272,4 @@ Both `config.py` files (project root and `flask_app/`) contain your API key and 
 - [x] Save conversation history to file
 - [x] Custom AI personality/persona
 - [x] Voice input and output
-- [ ] RAG (Retrieval Augmented Generation) support
+- [x] RAG (Retrieval Augmented Generation) support

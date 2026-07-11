@@ -80,6 +80,65 @@ def chat():
     return Response(stream_with_context(generate()), mimetype="text/plain")
 
 
+@app.route("/rag/upload", methods=["POST"])
+def rag_upload():
+    """Upload a .txt/.pdf/.docx file and add it to the shared knowledge base."""
+    if "document" not in request.files:
+        return jsonify({"error": "No document received."}), 400
+
+    doc_file = request.files["document"]
+    filename = doc_file.filename or ""
+    ext = os.path.splitext(filename)[1].lower()
+
+    if ext not in [".txt", ".pdf", ".docx"]:
+        return jsonify({"error": "Only .txt, .pdf, and .docx files are supported."}), 400
+
+    aria = get_chatbot()
+
+    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+        doc_file.save(tmp.name)
+        tmp_path = tmp.name
+
+    try:
+        chunk_count = aria.add_document_to_kb(tmp_path)
+    except Exception as e:
+        return jsonify({"error": f"Failed to process document: {e}"}), 500
+    finally:
+        os.remove(tmp_path)
+
+    return jsonify({"filename": filename, "chunks": chunk_count})
+
+
+@app.route("/rag/toggle", methods=["POST"])
+def rag_toggle():
+    """Enable/disable RAG for the current session."""
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get("enabled"))
+
+    aria = get_chatbot()
+    if enabled:
+        aria.enable_rag()
+    else:
+        aria.disable_rag()
+
+    return jsonify({"rag_enabled": aria.rag_enabled})
+
+
+@app.route("/rag/documents", methods=["GET"])
+def rag_documents():
+    """List documents currently in the shared knowledge base."""
+    aria = get_chatbot()
+    return jsonify({"documents": aria.list_kb_documents()})
+
+
+@app.route("/rag/clear", methods=["POST"])
+def rag_clear():
+    """Wipe the entire knowledge base (shared across all sessions)."""
+    aria = get_chatbot()
+    aria.clear_kb()
+    return jsonify({"status": "cleared"})
+
+
 @app.route("/clear", methods=["POST"])
 def clear():
     aria = get_chatbot()

@@ -7,6 +7,9 @@ const saveBtn = document.getElementById("save-btn");
 const personaSelect = document.getElementById("persona-select");
 const micBtn = document.getElementById("mic-btn");
 const speakToggleBtn = document.getElementById("speak-toggle-btn");
+const uploadDocBtn = document.getElementById("upload-doc-btn");
+const docFileInput = document.getElementById("doc-file-input");
+const ragToggleBtn = document.getElementById("rag-toggle-btn");
 
 const STREAM_ERROR_PREFIX = "__ARIA_STREAM_ERROR__:";
 
@@ -273,5 +276,53 @@ personaSelect.addEventListener("change", async () => {
     appendMessage("system", `🎭 Persona diganti ke: ${data.current}`);
   } catch (err) {
     appendMessage("error", "Gagal menghubungi server untuk ganti persona.");
+  }
+});
+
+// ---------- RAG (knowledge base) ----------
+let ragEnabled = false;
+
+ragToggleBtn.addEventListener("click", async () => {
+  ragEnabled = !ragEnabled;
+  try {
+    const res = await fetch("/rag/toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: ragEnabled }),
+    });
+    const data = await res.json();
+    ragEnabled = data.rag_enabled;
+  } catch (err) {
+    appendMessage("error", "Gagal menghubungi server untuk toggle RAG.");
+    ragEnabled = !ragEnabled; // revert on failure
+  }
+  ragToggleBtn.textContent = ragEnabled ? "📚 rag: on" : "📚 rag";
+  appendMessage("system", `📚 Knowledge base ${ragEnabled ? "diaktifkan" : "dimatikan"}.`);
+});
+
+uploadDocBtn.addEventListener("click", () => docFileInput.click());
+
+docFileInput.addEventListener("change", async () => {
+  const file = docFileInput.files[0];
+  docFileInput.value = ""; // reset so selecting the same file again still fires 'change'
+  if (!file) return;
+
+  appendMessage("system", `📚 Memproses "${file.name}"... (bisa makan waktu beberapa detik)`);
+
+  const formData = new FormData();
+  formData.append("document", file);
+
+  try {
+    const res = await fetch("/rag/upload", { method: "POST", body: formData });
+    const data = await res.json();
+
+    if (!res.ok) {
+      appendMessage("error", data.error || "Gagal memproses dokumen.");
+      return;
+    }
+
+    appendMessage("system", `✅ "${data.filename}" ditambahkan ke knowledge base (${data.chunks} chunks).`);
+  } catch (err) {
+    appendMessage("error", "Gagal mengunggah dokumen ke server.");
   }
 });

@@ -9,6 +9,7 @@ from datetime import datetime
 
 from groq import Groq
 from config import GROQ_API_KEY
+from rag_utils import KnowledgeBase
 
 SYSTEM_PROMPT = (
     "You are a helpful assistant named Aria. "
@@ -43,13 +44,19 @@ PERSONAS = {
 class AriaChatbot:
     """Wraps the Groq client and keeps conversation history."""
 
-    def __init__(self, api_key: str = GROQ_API_KEY, model: str = MODEL_NAME, persona: str = "default"):
+    def __init__(self, api_key: str = GROQ_API_KEY, model: str = MODEL_NAME, persona: str = "default",
+                 kb_path: str = "knowledge_base"):
         self.client = Groq(api_key=api_key)
         self.model = model
         self.conversation_history = []
         self.persona_name = "custom"
         self.system_prompt = SYSTEM_PROMPT
         self.set_persona(persona)
+
+        # RAG: the knowledge base is shared/global (documents Aria "knows"),
+        # separate from conversation_history (this one chat's back-and-forth).
+        self.kb = KnowledgeBase(persist_directory=kb_path)
+        self.rag_enabled = False
 
     def set_persona(self, persona) -> str:
         """
@@ -64,6 +71,24 @@ class AriaChatbot:
             self.persona_name = "custom"
             self.system_prompt = persona
         return self.system_prompt
+
+    # ---------- RAG (Retrieval Augmented Generation) ----------
+
+    def enable_rag(self):
+        self.rag_enabled = True
+
+    def disable_rag(self):
+        self.rag_enabled = False
+
+    def add_document_to_kb(self, filepath: str) -> int:
+        """Add a document (.txt/.pdf/.docx) to the knowledge base. Returns chunk count."""
+        return self.kb.add_document(filepath)
+
+    def list_kb_documents(self) -> list:
+        return self.kb.list_documents()
+
+    def clear_kb(self):
+        self.kb.clear()
 
     def chat(self, user_message: str) -> str:
         """Send a user message to Groq and return Aria's full reply (no streaming)."""
@@ -82,11 +107,28 @@ class AriaChatbot:
             "content": user_message
         })
 
+        messages = [{"role": "system", "content": self.system_prompt}]
+
+        if self.rag_enabled:
+            context_chunks = self.kb.query(user_message, top_k=3)
+            if context_chunks:
+                context_text = "\n\n---\n\n".join(context_chunks)
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        "The user has uploaded documents to a knowledge base. Use the "
+                        "following excerpts to help answer if they're relevant. If they "
+                        "aren't relevant to the question, ignore them and answer normally "
+                        "without mentioning the excerpts.\n\n"
+                        f"Excerpts:\n{context_text}"
+                    )
+                })
+
+        messages += self.conversation_history
+
         stream = self.client.chat.completions.create(
             model=self.model,
-            messages=[
-                {"role": "system", "content": self.system_prompt}
-            ] + self.conversation_history,
+            messages=messages,
             stream=True,
         )
 

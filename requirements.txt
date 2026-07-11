@@ -1,5 +1,7 @@
-flask
 groq
+sounddevice
+scipy
+pyttsx3
 chromadb
 sentence-transformers
 pypdf

@@ -42,6 +42,7 @@ class AriaGUI:
         self.is_waiting = False
         self.is_recording = False
         self.speak_enabled = False  # toggled via the 🔇/🔊 Speak button
+        self.rag_enabled = False    # toggled via the RAG button
 
         self._build_ui()
 
@@ -89,6 +90,22 @@ class AriaGUI:
             cursor="hand2"
         )
         self.speak_btn.pack(side="right", padx=(0, 8))
+
+        self.rag_btn = tk.Button(
+            header, text="📚 RAG: Off", command=self.toggle_rag,
+            bg=BTN_COLOR, fg=TEXT_COLOR, font=FONT_MAIN,
+            activebackground=BTN_HOVER, relief="flat", padx=10, pady=3,
+            cursor="hand2"
+        )
+        self.rag_btn.pack(side="right", padx=(0, 8))
+
+        add_doc_btn = tk.Button(
+            header, text="📎 Add Doc", command=self.add_document,
+            bg=BTN_COLOR, fg=TEXT_COLOR, font=FONT_MAIN,
+            activebackground=BTN_HOVER, relief="flat", padx=10, pady=3,
+            cursor="hand2"
+        )
+        add_doc_btn.pack(side="right", padx=(0, 8))
 
         # Chat display area
         self.chat_area = scrolledtext.ScrolledText(
@@ -234,6 +251,43 @@ class AriaGUI:
         self.speak_enabled = not self.speak_enabled
         label = "🔊 Speak" if self.speak_enabled else "🔇 Speak"
         self.speak_btn.configure(text=label)
+
+    def toggle_rag(self):
+        self.rag_enabled = not self.rag_enabled
+        if self.rag_enabled:
+            self.aria.enable_rag()
+        else:
+            self.aria.disable_rag()
+        label = "📚 RAG: On" if self.rag_enabled else "📚 RAG: Off"
+        self.rag_btn.configure(text=label)
+        self._append_system(f"📚 RAG (knowledge base) {'diaktifkan' if self.rag_enabled else 'dimatikan'}.")
+
+    def add_document(self):
+        filepath = filedialog.askopenfilename(
+            title="Pilih dokumen untuk knowledge base",
+            filetypes=[("Supported documents", "*.txt *.pdf *.docx"),
+                       ("All files", "*.*")],
+        )
+        if not filepath:
+            return  # user cancelled
+
+        self._append_system(f"📚 Memproses dokumen: {filepath.split('/')[-1]} (bisa makan waktu beberapa detik)...")
+        threading.Thread(target=self._add_document_thread, args=(filepath,), daemon=True).start()
+
+    def _add_document_thread(self, filepath):
+        try:
+            chunk_count = self.aria.add_document_to_kb(filepath)
+            self.root.after(0, self._on_document_added, filepath, chunk_count, None)
+        except Exception as e:
+            self.root.after(0, self._on_document_added, filepath, 0, str(e))
+
+    def _on_document_added(self, filepath, chunk_count, error):
+        import os
+        filename = os.path.basename(filepath)
+        if error:
+            messagebox.showerror("Error", f"Gagal memproses dokumen:\n{error}")
+            return
+        self._append_system(f"✅ '{filename}' ditambahkan ke knowledge base ({chunk_count} chunks).")
 
     def toggle_recording(self):
         if self.is_waiting or self.is_recording:
