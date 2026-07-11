@@ -266,10 +266,29 @@ Both `config.py` files (project root and `flask_app/`) contain your API key and 
 
 ## 🔮 Future Plans
 
-- [x] GUI version with Tkinter
-- [x] Web App version with Flask
-- [x] Streaming response (word by word like ChatGPT)
-- [x] Save conversation history to file
-- [x] Custom AI personality/persona
-- [x] Voice input and output
-- [x] RAG (Retrieval Augmented Generation) support
+- [ ] Harden RAG against prompt injection from uploaded documents
+- [ ] Persistent chat history with SQLite (survives server restarts)
+- [ ] Citations in RAG answers (show which document/chunk was used)
+- [ ] Markdown rendering in chat bubbles (code blocks, lists, etc.)
+- [ ] Tool calling / function calling (e.g. web search, calculator)
+- [ ] Smarter RAG chunking (sentence/paragraph-aware, not fixed character count)
+- [ ] Per-user knowledge base isolation on the Web App (currently shared across all sessions)
+- [ ] Refactor `chatbot_core.py` / `rag_utils.py` into a shared package instead of duplicated copies
+- [ ] Unit tests for core chat and RAG logic
+- [ ] Dockerize + deployment guide (Render/Railway) so the Web App is reachable beyond localhost
+- [ ] Voice activity detection for voice input (instead of a fixed 5-second recording)
+- [ ] "Regenerate response" button
+- [ ] Migrate off `llama-3.3-70b-versatile` (Groq announced deprecation June 17, 2026) to a currently-supported model
+
+---
+
+## ⚠️ Known Limitations
+
+Honest notes on where this project currently falls short of production-ready, for context on what the checklist above is addressing:
+
+- **Prompt injection risk in RAG**: text embedded from uploaded documents is inserted into the system prompt as context. A document containing instruction-like text could influence Aria's behavior. No sanitization or instruction-hardening is in place yet.
+- **In-memory session storage**: the Flask app's `sessions` dict lives in memory only — a server restart wipes all active conversations and per-session toggles (RAG/speak state).
+- **Duplicated core logic**: `chatbot_core.py` and `rag_utils.py` each exist as two identical copies (project root and `flask_app/`), since the Web App runs as a separate project. Any bugfix has to be applied to both.
+- **Shared knowledge base across sessions**: on the Web App, all browser sessions currently read from and write to the same ChromaDB knowledge base — there's no per-user isolation, so one user's uploaded documents are visible to everyone.
+- **No automated tests**: refactors currently rely on manual testing rather than a test suite.
+- **Fixed-duration voice recording**: CLI/GUI voice input always records for a flat 5 seconds regardless of how long the person actually speaks.
