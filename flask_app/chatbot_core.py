@@ -4,12 +4,29 @@ Core logic for ARIA chatbot (Groq + LLaMA 3.3 70B).
 Shared by both the CLI (chatbot.py) and GUI (chatbot_gui.py) versions.
 """
 
+import os
 import json
 from datetime import datetime
 
 from groq import Groq
-from config import GROQ_API_KEY
-from rag_utils import KnowledgeBase
+
+# Falls back to an environment variable if config.py isn't present — which is
+# the case on Render/Railway, since config.py is gitignored and never pushed.
+# Locally, config.py (with your real key) takes priority as before.
+try:
+    from config import GROQ_API_KEY
+except ImportError:
+    GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+
+# RAG can be switched off entirely via ENABLE_RAG=false. This matters for
+# low-memory deployments (e.g. Render's free 512MB tier): sentence-transformers
+# pulls in torch, which costs a few hundred MB of RAM just from being
+# imported — whether or not RAG is ever actually used. Skipping the import
+# is the only way to actually reclaim that memory.
+RAG_AVAILABLE = os.environ.get("ENABLE_RAG", "true").lower() != "false"
+
+if RAG_AVAILABLE:
+    from rag_utils import KnowledgeBase
 
 SYSTEM_PROMPT = (
     "You are a helpful assistant named Aria. "
@@ -55,7 +72,9 @@ class AriaChatbot:
 
         # RAG: the knowledge base is shared/global (documents Aria "knows"),
         # separate from conversation_history (this one chat's back-and-forth).
-        self.kb = KnowledgeBase(persist_directory=kb_path)
+        # self.kb stays None entirely when RAG_AVAILABLE is False, so no
+        # ChromaDB/embedding objects are ever created on this deployment.
+        self.kb = KnowledgeBase(persist_directory=kb_path) if RAG_AVAILABLE else None
         self.rag_enabled = False
 
     def set_persona(self, persona) -> str:
@@ -75,6 +94,8 @@ class AriaChatbot:
     # ---------- RAG (Retrieval Augmented Generation) ----------
 
     def enable_rag(self):
+        if self.kb is None:
+            raise RuntimeError("RAG is disabled on this deployment (ENABLE_RAG=false).")
         self.rag_enabled = True
 
     def disable_rag(self):
@@ -82,13 +103,16 @@ class AriaChatbot:
 
     def add_document_to_kb(self, filepath: str) -> int:
         """Add a document (.txt/.pdf/.docx) to the knowledge base. Returns chunk count."""
+        if self.kb is None:
+            raise RuntimeError("RAG is disabled on this deployment (ENABLE_RAG=false).")
         return self.kb.add_document(filepath)
 
     def list_kb_documents(self) -> list:
-        return self.kb.list_documents()
+        return self.kb.list_documents() if self.kb else []
 
     def clear_kb(self):
-        self.kb.clear()
+        if self.kb:
+            self.kb.clear()
 
     def chat(self, user_message: str) -> str:
         """Send a user message to Groq and return Aria's full reply (no streaming)."""

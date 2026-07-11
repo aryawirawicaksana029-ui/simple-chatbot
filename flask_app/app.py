@@ -17,7 +17,7 @@ from flask import (
     Response, stream_with_context, make_response
 )
 
-from chatbot_core import AriaChatbot, PERSONAS
+from chatbot_core import AriaChatbot, PERSONAS, RAG_AVAILABLE
 
 app = Flask(__name__)
 # Secret key for signing the session cookie (session only stores a session_id,
@@ -47,6 +47,14 @@ def get_chatbot() -> AriaChatbot:
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/config")
+def config_info():
+    """Tells the frontend which features are available on this deployment,
+    so it can hide UI elements for features that are disabled (e.g. RAG on
+    a low-memory hosting tier) instead of showing broken buttons."""
+    return jsonify({"rag_enabled": RAG_AVAILABLE})
 
 
 STREAM_ERROR_PREFIX = "__ARIA_STREAM_ERROR__:"
@@ -83,6 +91,9 @@ def chat():
 @app.route("/rag/upload", methods=["POST"])
 def rag_upload():
     """Upload a .txt/.pdf/.docx file and add it to the shared knowledge base."""
+    if not RAG_AVAILABLE:
+        return jsonify({"error": "RAG is disabled on this deployment."}), 503
+
     if "document" not in request.files:
         return jsonify({"error": "No document received."}), 400
 
@@ -112,6 +123,9 @@ def rag_upload():
 @app.route("/rag/toggle", methods=["POST"])
 def rag_toggle():
     """Enable/disable RAG for the current session."""
+    if not RAG_AVAILABLE:
+        return jsonify({"error": "RAG is disabled on this deployment."}), 503
+
     data = request.get_json(silent=True) or {}
     enabled = bool(data.get("enabled"))
 

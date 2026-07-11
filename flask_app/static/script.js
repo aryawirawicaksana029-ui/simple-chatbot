@@ -260,6 +260,24 @@ saveBtn.addEventListener("click", async () => {
 
 chatInput.focus();
 
+// ---------- Feature flags from the server ----------
+// Some deployments (e.g. low-memory free hosting tiers) disable RAG entirely
+// to save RAM, since even loading the embedding model costs a few hundred MB
+// whether or not it's used. Hide the RAG UI instead of showing broken buttons.
+(async () => {
+  try {
+    const res = await fetch("/config");
+    const data = await res.json();
+    if (!data.rag_enabled) {
+      uploadDocBtn.style.display = "none";
+      ragToggleBtn.style.display = "none";
+    }
+  } catch (err) {
+    // If /config itself fails, leave the RAG buttons visible — worst case
+    // the user sees a normal error message if they try to use them.
+  }
+})();
+
 personaSelect.addEventListener("change", async () => {
   const persona = personaSelect.value;
   try {
