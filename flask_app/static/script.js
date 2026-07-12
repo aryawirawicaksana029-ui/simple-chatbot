@@ -340,6 +340,9 @@ docFileInput.addEventListener("change", async () => {
     }
 
     appendMessage("system", `✅ "${data.filename}" ditambahkan ke knowledge base (${data.chunks} chunks).`);
+    if (data.flagged > 0) {
+      appendMessage("error", `⚠️ ${data.flagged} bagian dari dokumen ini mengandung pola yang mirip prompt injection. Aria tetap akan memperlakukannya sebagai referensi, bukan instruksi.`);
+    }
   } catch (err) {
     appendMessage("error", "Gagal mengunggah dokumen ke server.");
   }

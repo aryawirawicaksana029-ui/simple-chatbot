@@ -276,18 +276,23 @@ class AriaGUI:
 
     def _add_document_thread(self, filepath):
         try:
-            chunk_count = self.aria.add_document_to_kb(filepath)
-            self.root.after(0, self._on_document_added, filepath, chunk_count, None)
+            result = self.aria.add_document_to_kb(filepath)
+            self.root.after(0, self._on_document_added, filepath, result, None)
         except Exception as e:
-            self.root.after(0, self._on_document_added, filepath, 0, str(e))
+            self.root.after(0, self._on_document_added, filepath, None, str(e))
 
-    def _on_document_added(self, filepath, chunk_count, error):
+    def _on_document_added(self, filepath, result, error):
         import os
         filename = os.path.basename(filepath)
         if error:
             messagebox.showerror("Error", f"Gagal memproses dokumen:\n{error}")
             return
-        self._append_system(f"✅ '{filename}' ditambahkan ke knowledge base ({chunk_count} chunks).")
+        self._append_system(f"✅ '{filename}' ditambahkan ke knowledge base ({result['chunks']} chunks).")
+        if result["flagged"] > 0:
+            self._append_system(
+                f"⚠️ {result['flagged']} bagian dari '{filename}' mengandung pola yang mirip prompt "
+                f"injection. Aria tetap akan memperlakukannya sebagai referensi, bukan instruksi."
+            )
 
     def toggle_recording(self):
         if self.is_waiting or self.is_recording:

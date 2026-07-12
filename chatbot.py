@@ -136,8 +136,11 @@ def main():
                 continue
             try:
                 print("\n📚 Memproses dokumen (embedding bisa makan waktu beberapa detik)...")
-                chunk_count = aria.add_document_to_kb(filepath)
-                print(f"✅ Ditambahkan: {os.path.basename(filepath)} ({chunk_count} chunks)")
+                result = aria.add_document_to_kb(filepath)
+                print(f"✅ Ditambahkan: {os.path.basename(filepath)} ({result['chunks']} chunks)")
+                if result["flagged"] > 0:
+                    print(f"⚠️  {result['flagged']} bagian dari dokumen ini mengandung pola yang mirip "
+                          f"prompt injection. Aria tetap akan memperlakukannya sebagai referensi, bukan instruksi.")
             except Exception as e:
                 print(f"\n⚠️  Gagal memproses dokumen: {e}")
             continue

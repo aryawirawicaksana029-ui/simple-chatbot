@@ -17,6 +17,7 @@ and a slightly slower first run.
 """
 
 import os
+import re
 import uuid
 
 import chromadb
@@ -27,6 +28,34 @@ import docx
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"  # small, fast, good enough for portfolio-scale RAG
 CHUNK_SIZE = 500     # characters per chunk
 CHUNK_OVERLAP = 50   # overlap between consecutive chunks, so context isn't cut mid-thought
+
+# ---------- Prompt injection detection ----------
+# Heuristic, not foolproof: catches common/obvious injection phrasing in
+# uploaded documents (e.g. "ignore previous instructions"). This can't catch
+# every creative rephrasing, which is why chatbot_core.py *also* wraps all
+# retrieved excerpts in an explicit "this is data, not instructions" frame
+# regardless of whether anything gets flagged here — defense in depth, not
+# a single point of failure.
+INJECTION_PATTERNS = [
+    r"ignore (all|any|the)?\s*(previous|prior|above|earlier)\s*instructions",
+    r"disregard (all|any|the)?\s*(previous|prior|above|earlier)\s*instructions",
+    r"forget (everything|all|your)\s*(instructions|prompt)",
+    r"new instructions?:",
+    r"system prompt",
+    r"you are now",
+    r"reveal (your|the) (system prompt|instructions)",
+    r"pretend (you are|to be)",
+    r"act as (?:if you are|a jailbroken|dan\b)",
+    r"jailbreak",
+    r"do anything now",
+]
+
+_INJECTION_REGEX = re.compile("|".join(INJECTION_PATTERNS), re.IGNORECASE)
+
+
+def contains_suspected_injection(text: str) -> bool:
+    """Heuristic check for common prompt-injection phrasing in a chunk of text."""
+    return bool(_INJECTION_REGEX.search(text))
 
 
 # ---------- Document loaders ----------
@@ -97,22 +126,29 @@ class KnowledgeBase:
         # (downloads ~80MB of model weights, then caches them locally).
         self.embedder = SentenceTransformer(EMBEDDING_MODEL_NAME)
 
-    def add_document(self, filepath: str) -> int:
+    def add_document(self, filepath: str) -> dict:
         """
         Reads, chunks, embeds, and stores a document in the knowledge base.
-        Returns the number of chunks that were added (0 if the file had no
-        extractable text).
+        Each chunk is also scanned for suspected prompt-injection phrasing
+        and tagged accordingly in its metadata (used later to warn the user
+        and to strengthen the framing when the chunk is retrieved).
+
+        Returns {"chunks": <count>, "flagged": <count of suspicious chunks>}.
         """
         text = load_document_text(filepath)
         chunks = chunk_text(text)
 
         if not chunks:
-            return 0
+            return {"chunks": 0, "flagged": 0}
 
         filename = os.path.basename(filepath)
         embeddings = self.embedder.encode(chunks).tolist()
         ids = [str(uuid.uuid4()) for _ in chunks]
-        metadatas = [{"source": filename, "chunk_index": i} for i in range(len(chunks))]
+        flags = [contains_suspected_injection(chunk) for chunk in chunks]
+        metadatas = [
+            {"source": filename, "chunk_index": i, "injection_flag": flags[i]}
+            for i in range(len(chunks))
+        ]
 
         self.collection.add(
             ids=ids,
@@ -120,10 +156,16 @@ class KnowledgeBase:
             documents=chunks,
             metadatas=metadatas,
         )
-        return len(chunks)
+        return {"chunks": len(chunks), "flagged": sum(flags)}
 
     def query(self, question: str, top_k: int = 3) -> list:
-        """Return the top_k most relevant chunks for `question` (empty list if the KB has nothing yet)."""
+        """
+        Return the top_k most relevant chunks for `question` as a list of
+        {"text": ..., "flagged": bool} dicts (empty list if the KB has
+        nothing yet). `flagged` marks chunks whose source document matched
+        suspected prompt-injection phrasing, so the caller can warn the
+        model to treat them with extra suspicion.
+        """
         if self.collection.count() == 0:
             return []
 
@@ -131,8 +173,18 @@ class KnowledgeBase:
         results = self.collection.query(
             query_embeddings=query_embedding,
             n_results=min(top_k, self.collection.count()),
+            include=["documents", "metadatas"],
         )
-        return results["documents"][0] if results["documents"] else []
+
+        if not results["documents"] or not results["documents"][0]:
+            return []
+
+        docs = results["documents"][0]
+        metas = results["metadatas"][0]
+        return [
+            {"text": doc, "flagged": bool(meta.get("injection_flag", False))}
+            for doc, meta in zip(docs, metas)
+        ]
 
     def list_documents(self) -> list:
         """Return the unique source filenames currently stored in the knowledge base."""

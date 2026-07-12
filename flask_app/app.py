@@ -111,13 +111,13 @@ def rag_upload():
         tmp_path = tmp.name
 
     try:
-        chunk_count = aria.add_document_to_kb(tmp_path)
+        result = aria.add_document_to_kb(tmp_path)
     except Exception as e:
         return jsonify({"error": f"Failed to process document: {e}"}), 500
     finally:
         os.remove(tmp_path)
 
-    return jsonify({"filename": filename, "chunks": chunk_count})
+    return jsonify({"filename": filename, "chunks": result["chunks"], "flagged": result["flagged"]})
 
 
 @app.route("/rag/toggle", methods=["POST"])

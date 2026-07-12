@@ -213,7 +213,7 @@ The core chat logic lives in `chatbot_core.py` and is shared by the CLI and GUI 
 
 **Voice output** deliberately uses two different engines depending on environment: the Web App speaks replies with the browser's built-in `speechSynthesis` (free, client-side, zero extra dependencies), while the CLI and GUI — which have no browser — use `pyttsx3`, an offline Python TTS engine, so neither needs an API call or an internet connection to talk back.
 
-**RAG** works like this: uploaded documents (`.txt`/`.pdf`/`.docx`) are split into ~500-character chunks, each chunk is turned into a vector with a local `sentence-transformers` model (`all-MiniLM-L6-v2` — Groq doesn't host embedding models, only chat/Whisper/TTS), and stored in a persistent ChromaDB collection. When RAG is toggled on, every user message is first embedded and matched against that collection; the top 3 most relevant chunks are injected as extra context in the system prompt before the request goes to Groq. The knowledge base is intentionally **shared and persistent across the whole app** — unlike conversation history, which is per-session — since it represents documents Aria "knows about" globally, not something tied to one particular chat.
+**RAG** works like this: uploaded documents (`.txt`/`.pdf`/`.docx`) are split into ~500-character chunks, each chunk is turned into a vector with a local `sentence-transformers` model (`all-MiniLM-L6-v2` — Groq doesn't host embedding models, only chat/Whisper/TTS), and stored in a persistent ChromaDB collection. Each chunk is also scanned with a heuristic regex for common prompt-injection phrasing (e.g. "ignore previous instructions", "you are now") and flagged accordingly — you're warned right after upload if anything suspicious was found, though this is a heuristic and not foolproof. When RAG is toggled on, every user message is first embedded and matched against that collection; the top 3 most relevant chunks are wrapped in `<untrusted_document_excerpts>` tags with an explicit system instruction that the content is reference data to consult, never commands to obey — even if a chunk contains text that looks like an instruction — before the request goes to Groq. The knowledge base is intentionally **shared and persistent across the whole app** — unlike conversation history, which is per-session — since it represents documents Aria "knows about" globally, not something tied to one particular chat.
 
 ---
 
@@ -233,7 +233,9 @@ simple-chatbot/
 │   ├── app.py           # Flask routes (/, /chat, /clear, /persona, /download, /transcribe, /rag/*)
 │   ├── chatbot_core.py   # Local copy of the core logic
 │   ├── rag_utils.py      # Local copy of the RAG knowledge base logic
-│   ├── requirements.txt  # flask, groq, chromadb, sentence-transformers, pypdf, python-docx
+│   ├── requirements.txt  # flask, groq, chromadb, sentence-transformers, pypdf, python-docx (full, for local dev)
+│   ├── requirements-deploy.txt  # flask, groq, gunicorn only — lean build for RAG-disabled cloud deployments
+│   ├── Procfile          # gunicorn start command (used by platforms that read Procfiles)
 │   ├── templates/
 │   │   └── index.html
 │   └── static/
@@ -249,9 +251,50 @@ simple-chatbot/
 
 ---
 
+## ☁️ Deployment (Web App)
+
+The Web App version (`flask_app/`) can be deployed to [Render](https://render.com) so it's reachable at a public URL, not just `localhost`.
+
+**Note on RAG in production:** Render's free web service tier has 512MB of RAM. `sentence-transformers` pulls in `torch`, which alone can use several hundred MB just from being imported — regardless of whether RAG is actually used. To keep the deployed instance stable (and builds fast/cheap on credit-based platforms like Railway), RAG is switched off there via an environment variable (`ENABLE_RAG=false`), and the deploy build uses a separate lean `requirements-deploy.txt` that skips `chromadb`/`sentence-transformers`/`pypdf`/`python-docx` entirely — since `chatbot_core.py` never imports `rag_utils` when `ENABLE_RAG=false`, those packages genuinely aren't needed at runtime. Voice input/output, streaming chat, personas, and save/download all work exactly the same — only the RAG upload/toggle buttons are hidden. The RAG code itself is untouched and still fully usable when you run the project locally with the full `requirements.txt` (where `ENABLE_RAG` isn't set, so it defaults to on).
+
+**Steps (Render):**
+
+1. Push this repo to GitHub (already done ✅).
+2. On [Render](https://render.com), create a **New → Web Service** and connect your GitHub repo.
+3. Set these fields:
+   - **Root Directory**: `flask_app`
+   - **Build Command**: `pip install -r requirements-deploy.txt`
+   - **Start Command**: `gunicorn app:app`
+4. Add these **Environment Variables** in Render's dashboard (never commit these — that's what `config.py` + `.gitignore` are for locally):
+   - `GROQ_API_KEY` — your Groq API key
+   - `FLASK_SECRET_KEY` — any random string (used to sign session cookies)
+   - `ENABLE_RAG` — set to `false` for the free tier; leave unset (or `true`) if you're on a paid tier with more RAM, and switch the build command back to `pip install -r requirements.txt`
+5. Deploy. Render gives you a live HTTPS URL once the build finishes.
+
+**Steps (Railway) — an alternative if Render's card verification doesn't go through:**
+
+1. On [Railway](https://railway.app), sign up with GitHub (no card required for the free tier).
+2. **New Project → Deploy from GitHub repo** → select this repo.
+3. In **Settings**:
+   - **Root Directory**: `flask_app`
+   - **Custom Start Command**: `gunicorn app:app` (Railway's auto-detection doesn't always pick this up correctly for subfolder deployments, so set it explicitly)
+   - Change the build step to install from `requirements-deploy.txt` instead of `requirements.txt` (check your builder's config options for a custom install command, e.g. `pip install -r requirements-deploy.txt`)
+4. In **Variables**, add `GROQ_API_KEY`, `FLASK_SECRET_KEY`, and `ENABLE_RAG=false`.
+5. Go to **Settings → Networking → Generate Domain** to get a public HTTPS URL (Railway doesn't do this automatically).
+6. Railway's free tier runs on monthly credits rather than fixed hours — it pauses (not bills you) once the month's credit is used up, since no card is on file.
+
+**Things to expect on the free tier:**
+- The service spins down after a period of no traffic, and the next request triggers a cold start (roughly 30-60 seconds). Normal behavior, not a bug — mention it if you're demoing live.
+- The container's disk is ephemeral: anything written to disk (temp audio files, temp document uploads) is deleted automatically after each request and wiped entirely on redeploy — this project's downloads (`/download`) generate the file on the fly rather than saving it server-side, so this doesn't cause any data loss.
+- If you later want RAG enabled in production too, upgrade to a paid tier with more RAM, set `ENABLE_RAG=true`, and switch the build command back to the full `requirements.txt`.
+
+---
+
 ## 🔒 Security Note
 
 Both `config.py` files (project root and `flask_app/`) contain your API key and are excluded from GitHub via `.gitignore`. Never share or commit your API key publicly — and if it's ever exposed, revoke it right away in the Groq Console.
+
+On a deployed instance, the API key instead comes from the `GROQ_API_KEY` environment variable set in your hosting provider's dashboard (see Deployment section above) — `chatbot_core.py` falls back to it automatically when `config.py` isn't present.
 
 ---
 
@@ -266,7 +309,14 @@ Both `config.py` files (project root and `flask_app/`) contain your API key and 
 
 ## 🔮 Future Plans
 
-- [ ] Harden RAG against prompt injection from uploaded documents
+- [x] GUI version with Tkinter
+- [x] Web App version with Flask
+- [x] Streaming response (word by word like ChatGPT)
+- [x] Save conversation history to file
+- [x] Custom AI personality/persona
+- [x] Voice input and output
+- [x] RAG (Retrieval Augmented Generation) support
+- [x] Harden RAG against prompt injection from uploaded documents
 - [ ] Persistent chat history with SQLite (survives server restarts)
 - [ ] Citations in RAG answers (show which document/chunk was used)
 - [ ] Markdown rendering in chat bubbles (code blocks, lists, etc.)
@@ -275,7 +325,8 @@ Both `config.py` files (project root and `flask_app/`) contain your API key and 
 - [ ] Per-user knowledge base isolation on the Web App (currently shared across all sessions)
 - [ ] Refactor `chatbot_core.py` / `rag_utils.py` into a shared package instead of duplicated copies
 - [ ] Unit tests for core chat and RAG logic
-- [ ] Dockerize + deployment guide (Render/Railway) so the Web App is reachable beyond localhost
+- [x] Deployment guide so the Web App is reachable beyond localhost (Render)
+- [ ] Dockerize the project (for more portable/consistent deployment across providers)
 - [ ] Voice activity detection for voice input (instead of a fixed 5-second recording)
 - [ ] "Regenerate response" button
 - [ ] Migrate off `llama-3.3-70b-versatile` (Groq announced deprecation June 17, 2026) to a currently-supported model
@@ -286,7 +337,7 @@ Both `config.py` files (project root and `flask_app/`) contain your API key and 
 
 Honest notes on where this project currently falls short of production-ready, for context on what the checklist above is addressing:
 
-- **Prompt injection risk in RAG**: text embedded from uploaded documents is inserted into the system prompt as context. A document containing instruction-like text could influence Aria's behavior. No sanitization or instruction-hardening is in place yet.
+- **Prompt injection mitigation in RAG is heuristic, not foolproof**: uploaded document chunks are scanned for common injection phrasing (e.g. "ignore previous instructions") and flagged to the person uploading them, and all retrieved excerpts are wrapped in `<untrusted_document_excerpts>` tags with an explicit system instruction that the content is data, not commands. This meaningfully raises the bar, but a sufficiently creative rephrasing could still slip past the regex heuristics — defense in depth (flagging + framing), not a guarantee.
 - **In-memory session storage**: the Flask app's `sessions` dict lives in memory only — a server restart wipes all active conversations and per-session toggles (RAG/speak state).
 - **Duplicated core logic**: `chatbot_core.py` and `rag_utils.py` each exist as two identical copies (project root and `flask_app/`), since the Web App runs as a separate project. Any bugfix has to be applied to both.
 - **Shared knowledge base across sessions**: on the Web App, all browser sessions currently read from and write to the same ChromaDB knowledge base — there's no per-user isolation, so one user's uploaded documents are visible to everyone.
