@@ -76,6 +76,7 @@ class AriaChatbot:
         # ChromaDB/embedding objects are ever created on this deployment.
         self.kb = KnowledgeBase(persist_directory=kb_path) if RAG_AVAILABLE else None
         self.rag_enabled = False
+        self.last_rag_sources = []  # citations for the most recent chat_stream() call
 
     def set_persona(self, persona) -> str:
         """
@@ -133,12 +134,22 @@ class AriaChatbot:
         })
 
         messages = [{"role": "system", "content": self.system_prompt}]
+        self.last_rag_sources = []  # reset each call; only populated if RAG actually contributes context
 
         if self.rag_enabled:
             context_chunks = self.kb.query(user_message, top_k=3)
             if context_chunks:
                 any_flagged = any(c["flagged"] for c in context_chunks)
                 context_text = "\n\n---\n\n".join(c["text"] for c in context_chunks)
+
+                # Citations: decided by retrieval, not by asking the model to
+                # self-report — we already know exactly which chunks were
+                # fetched, so we surface those directly instead of trusting
+                # the model's own (sometimes inconsistent) citations.
+                self.last_rag_sources = [
+                    {"source": c["source"], "chunk_index": c["chunk_index"]}
+                    for c in context_chunks
+                ]
 
                 injection_warning = (
                     "\n\nSecurity note: one or more excerpts below matched patterns commonly "
@@ -182,6 +193,22 @@ class AriaChatbot:
             "role": "assistant",
             "content": full_reply
         })
+
+    def get_rag_citations(self) -> list:
+        """
+        Return a deduplicated, human-friendly citation list for the most
+        recent chat_stream() reply — one entry per source document, with
+        how many of the retrieved chunks came from it. Empty list if RAG
+        wasn't enabled or didn't retrieve anything relevant for that reply.
+        """
+        if not self.last_rag_sources:
+            return []
+
+        counts = {}
+        for item in self.last_rag_sources:
+            counts[item["source"]] = counts.get(item["source"], 0) + 1
+
+        return [{"source": source, "chunks_used": count} for source, count in counts.items()]
 
     def transcribe_audio(self, filepath: str, language: str = None) -> str:
         """

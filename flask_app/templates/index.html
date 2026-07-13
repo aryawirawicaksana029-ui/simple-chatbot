@@ -88,6 +88,13 @@
     <p class="footer-note">Riwayat percakapan disimpan sementara di server selama sesi browser ini aktif.</p>
   </div>
 
+  <!-- marked: renders Aria's Markdown replies (code blocks, lists, etc.) as HTML.
+       DOMPurify: sanitizes that HTML before it's inserted into the page, so a
+       malicious RAG document or an unusual model reply can't smuggle in a
+       <script> tag or similar — same defense-in-depth spirit as the RAG
+       prompt-injection handling in chatbot_core.py. -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
   <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

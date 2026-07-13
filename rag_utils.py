@@ -161,10 +161,12 @@ class KnowledgeBase:
     def query(self, question: str, top_k: int = 3) -> list:
         """
         Return the top_k most relevant chunks for `question` as a list of
-        {"text": ..., "flagged": bool} dicts (empty list if the KB has
-        nothing yet). `flagged` marks chunks whose source document matched
-        suspected prompt-injection phrasing, so the caller can warn the
-        model to treat them with extra suspicion.
+        {"text": ..., "source": ..., "chunk_index": ..., "flagged": bool}
+        dicts (empty list if the KB has nothing yet). `source`/`chunk_index`
+        let the caller cite exactly which document (and which part of it)
+        an answer drew from. `flagged` marks chunks whose source document
+        matched suspected prompt-injection phrasing, so the caller can warn
+        the model to treat them with extra suspicion.
         """
         if self.collection.count() == 0:
             return []
@@ -182,7 +184,12 @@ class KnowledgeBase:
         docs = results["documents"][0]
         metas = results["metadatas"][0]
         return [
-            {"text": doc, "flagged": bool(meta.get("injection_flag", False))}
+            {
+                "text": doc,
+                "source": meta.get("source", "unknown"),
+                "chunk_index": meta.get("chunk_index", 0),
+                "flagged": bool(meta.get("injection_flag", False)),
+            }
             for doc, meta in zip(docs, metas)
         ]
 

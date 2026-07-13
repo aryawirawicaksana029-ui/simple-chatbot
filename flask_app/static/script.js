@@ -12,6 +12,7 @@ const docFileInput = document.getElementById("doc-file-input");
 const ragToggleBtn = document.getElementById("rag-toggle-btn");
 
 const STREAM_ERROR_PREFIX = "__ARIA_STREAM_ERROR__:";
+const STREAM_CITATIONS_PREFIX = "__ARIA_CITATIONS__:";
 
 // ---------- Voice output (browser speechSynthesis) ----------
 let speakEnabled = false;
@@ -109,38 +110,61 @@ function appendMessage(role, text) {
   label.className = "msg-label";
   label.textContent = role === "user" ? "you" : role === "aria" ? "aria" : role;
 
-  const p = document.createElement("p");
-  p.textContent = text;
+  // Aria's replies get rendered as Markdown (code blocks, lists, bold, etc.),
+  // so the body needs to be a <div> — a <p> can't legally contain block-level
+  // elements like <pre> or <ul>. Every other role stays plain text.
+  const body = document.createElement(role === "aria" ? "div" : "p");
+  body.className = "msg-body";
+  body.textContent = text;
 
   msg.appendChild(label);
-  msg.appendChild(p);
+  msg.appendChild(body);
   chatLog.appendChild(msg);
   scrollToBottom();
-  return p;
+  return body;
 }
 
-// Creates an empty Aria bubble with a blinking cursor, to be filled in
-// as streamed chunks arrive.
+// Creates an empty Aria bubble with a blinking cursor, to be filled in as
+// streamed chunks arrive as PLAIN TEXT — rendering Markdown mid-stream is
+// unreliable (e.g. an unclosed ``` code fence looks broken until the rest
+// arrives). The full Markdown render happens once, in finalizeAriaStreamBubble.
 function createAriaStreamBubble() {
-  const p = appendMessage("aria", "");
+  const body = appendMessage("aria", "");
   const cursor = document.createElement("span");
   cursor.className = "stream-cursor";
   cursor.textContent = "▍";
-  p.appendChild(cursor);
-  return p;
+  body.appendChild(cursor);
+  return body;
 }
 
-function updateAriaStreamBubble(p, text) {
-  p.textContent = text;
+function updateAriaStreamBubble(body, text) {
+  body.textContent = text;
   const cursor = document.createElement("span");
   cursor.className = "stream-cursor";
   cursor.textContent = "▍";
-  p.appendChild(cursor);
+  body.appendChild(cursor);
   scrollToBottom();
 }
 
-function finalizeAriaStreamBubble(p, text) {
-  p.textContent = text;
+// Converts Markdown -> HTML (marked), then strips anything unsafe (DOMPurify)
+// before it's ever inserted into the page. Returns null if the CDN libraries
+// didn't load (offline, blocked network, etc.) so the caller can fall back
+// to plain text instead of breaking.
+function renderMarkdown(text) {
+  if (typeof marked === "undefined" || typeof DOMPurify === "undefined") {
+    return null;
+  }
+  const rawHtml = marked.parse(text);
+  return DOMPurify.sanitize(rawHtml);
+}
+
+function finalizeAriaStreamBubble(body, text) {
+  const html = renderMarkdown(text);
+  if (html !== null) {
+    body.innerHTML = html;
+  } else {
+    body.textContent = text;
+  }
   scrollToBottom();
 }
 
@@ -188,15 +212,38 @@ async function sendMessage(message) {
         continue; // keep draining the stream, but stop rendering it as a reply
       }
 
-      updateAriaStreamBubble(bubble, fullText);
+      // Don't render the trailing citations JSON as if it were reply text.
+      const citationsIndex = fullText.indexOf(STREAM_CITATIONS_PREFIX);
+      const displayText = citationsIndex !== -1 ? fullText.slice(0, citationsIndex) : fullText;
+      updateAriaStreamBubble(bubble, displayText);
     }
 
     if (sawError) {
       bubble.closest(".msg").remove();
       appendMessage("error", fullText.replace(STREAM_ERROR_PREFIX, ""));
-    } else {
-      finalizeAriaStreamBubble(bubble, fullText);
-      speakText(fullText);
+      return;
+    }
+
+    const citationsIndex = fullText.indexOf(STREAM_CITATIONS_PREFIX);
+    let replyText = fullText;
+    let citations = null;
+
+    if (citationsIndex !== -1) {
+      replyText = fullText.slice(0, citationsIndex);
+      const citationsJson = fullText.slice(citationsIndex + STREAM_CITATIONS_PREFIX.length);
+      try {
+        citations = JSON.parse(citationsJson);
+      } catch (err) {
+        citations = null; // malformed — skip showing citations rather than breaking the reply
+      }
+    }
+
+    finalizeAriaStreamBubble(bubble, replyText);
+    speakText(replyText);
+
+    if (citations && citations.length > 0) {
+      const parts = citations.map((c) => `${c.source} (${c.chunks_used} bagian)`);
+      appendMessage("system", `📚 Sumber: ${parts.join(", ")}`);
     }
   } catch (err) {
     bubble.closest(".msg").remove();

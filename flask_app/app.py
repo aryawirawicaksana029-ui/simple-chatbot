@@ -10,6 +10,7 @@ Then open http://127.0.0.1:5000 in your browser.
 import os
 import uuid
 import tempfile
+import json
 from datetime import datetime
 
 from flask import (
@@ -18,6 +19,7 @@ from flask import (
 )
 
 from chatbot_core import AriaChatbot, PERSONAS, RAG_AVAILABLE
+import db_utils
 
 app = Flask(__name__)
 # Secret key for signing the session cookie (session only stores a session_id,
@@ -25,21 +27,45 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.urandom(24))
 
 # In-memory store: session_id -> AriaChatbot instance.
-# NOTE: This resets whenever the server restarts, and only works with a
-# single process (fine for local/dev use). For production with multiple
-# workers, back this with Redis or a database instead.
+# This still resets whenever the Flask *process* restarts, but get_chatbot()
+# below repopulates each AriaChatbot from SQLite (db_utils.py) the moment
+# it's recreated, so conversation history and settings aren't actually lost —
+# only the in-memory cache is empty right after a restart.
 sessions: dict[str, AriaChatbot] = {}
 
 
+def _persist_settings(aria: AriaChatbot, session_id: str):
+    """Save this session's current persona + RAG toggle to SQLite."""
+    persona_key = aria.persona_name
+    custom_prompt = aria.system_prompt if persona_key == "custom" else None
+    db_utils.save_settings(session_id, persona_key, custom_prompt, aria.rag_enabled)
+
+
 def get_chatbot() -> AriaChatbot:
-    """Get (or create) the AriaChatbot tied to the current browser session."""
+    """Get (or create) the AriaChatbot tied to the current browser session.
+    On first access after a process restart, this restores conversation
+    history and settings (persona, RAG toggle) from SQLite instead of
+    starting the person's session over from scratch."""
     if "session_id" not in session:
         session["session_id"] = str(uuid.uuid4())
 
     session_id = session["session_id"]
 
     if session_id not in sessions:
-        sessions[session_id] = AriaChatbot()
+        aria = AriaChatbot()
+
+        settings = db_utils.load_settings(session_id)
+        if settings["persona_key"] == "custom" and settings["custom_prompt"]:
+            aria.set_persona(settings["custom_prompt"])
+        else:
+            aria.set_persona(settings["persona_key"])
+
+        if settings["rag_enabled"] and RAG_AVAILABLE:
+            aria.enable_rag()
+
+        aria.conversation_history = db_utils.load_messages(session_id)
+
+        sessions[session_id] = aria
 
     return sessions[session_id]
 
@@ -58,6 +84,7 @@ def config_info():
 
 
 STREAM_ERROR_PREFIX = "__ARIA_STREAM_ERROR__:"
+STREAM_CITATIONS_PREFIX = "__ARIA_CITATIONS__:"
 
 
 @app.route("/chat", methods=["POST"])
@@ -69,6 +96,8 @@ def chat():
     If something goes wrong *after* streaming has already started, we can't
     change the HTTP status anymore (headers are already sent), so the error
     is sent inline with a special prefix that the frontend knows to detect.
+    RAG citations (if any) are sent the same way, as a trailing JSON blob
+    after a special prefix, once the reply has fully streamed.
     """
     data = request.get_json(silent=True) or {}
     user_message = (data.get("message") or "").strip()
@@ -77,11 +106,22 @@ def chat():
         return jsonify({"error": "Message can't be empty."}), 400
 
     aria = get_chatbot()
+    session_id = session["session_id"]
 
     def generate():
+        full_reply = ""
         try:
             for chunk in aria.chat_stream(user_message):
+                full_reply += chunk
                 yield chunk
+            # Only persist once the full reply has arrived successfully —
+            # avoids saving a half-finished exchange if the stream errors out.
+            db_utils.append_message(session_id, "user", user_message)
+            db_utils.append_message(session_id, "assistant", full_reply)
+
+            citations = aria.get_rag_citations()
+            if citations:
+                yield f"{STREAM_CITATIONS_PREFIX}{json.dumps(citations)}"
         except Exception as e:
             yield f"{STREAM_ERROR_PREFIX}Failed to reach Groq API: {e}"
 
@@ -130,10 +170,13 @@ def rag_toggle():
     enabled = bool(data.get("enabled"))
 
     aria = get_chatbot()
+    session_id = session["session_id"]
     if enabled:
         aria.enable_rag()
     else:
         aria.disable_rag()
+
+    _persist_settings(aria, session_id)
 
     return jsonify({"rag_enabled": aria.rag_enabled})
 
@@ -156,7 +199,9 @@ def rag_clear():
 @app.route("/clear", methods=["POST"])
 def clear():
     aria = get_chatbot()
+    session_id = session["session_id"]
     aria.clear_history()
+    db_utils.clear_messages(session_id)
     return jsonify({"status": "cleared"})
 
 
@@ -208,6 +253,7 @@ def persona():
         return jsonify({"error": "Persona can't be empty."}), 400
 
     aria.set_persona(new_persona)
+    _persist_settings(aria, session["session_id"])
     return jsonify({"current": aria.persona_name})
 
 

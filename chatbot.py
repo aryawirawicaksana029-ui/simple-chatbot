@@ -41,6 +41,11 @@ def handle_message(user_text: str):
         print(f"\n⚠️  Failed to reach Groq API: {e}", end="")
     print()
 
+    citations = aria.get_rag_citations()
+    if citations:
+        parts = [f"{c['source']} ({c['chunks_used']} bagian)" for c in citations]
+        print(f"📚 Sumber: {', '.join(parts)}")
+
     if speak_enabled and full_reply.strip():
         voice_output.speak(full_reply)
 

@@ -226,6 +226,11 @@ class AriaGUI:
             self.chat_area.configure(state="disabled")
             self.chat_area.see(tk.END)
 
+            citations = self.aria.get_rag_citations()
+            if citations:
+                parts = [f"{c['source']} ({c['chunks_used']} bagian)" for c in citations]
+                self._append_system(f"📚 Sumber: {', '.join(parts)}")
+
             if self.speak_enabled and full_reply.strip():
                 # pyttsx3's runAndWait() blocks, so speak on a background
                 # thread to keep the GUI responsive.

@@ -22,7 +22,7 @@ Now available in three versions:
 - ✅ **Custom AI personality/persona** — switch Aria's tone between `default`, `formal`, `santai`, `sarcastic`, or `mentor` (or set your own custom prompt), on the fly
 - ✅ **Voice input** — speak to Aria instead of typing; audio is transcribed via Groq's Whisper (`whisper-large-v3`), across all three interfaces
 - ✅ **Voice output** — Aria can read her replies aloud: browser `speechSynthesis` on the Web App, offline `pyttsx3` on CLI/GUI
-- ✅ **RAG (Retrieval Augmented Generation)** — upload `.txt`/`.pdf`/`.docx` documents to a shared knowledge base (ChromaDB + local `sentence-transformers` embeddings); toggle it on to have Aria answer using your documents as context
+- ✅ **RAG (Retrieval Augmented Generation)** — upload `.txt`/`.pdf`/`.docx` documents to a shared knowledge base (ChromaDB + local `sentence-transformers` embeddings); toggle it on to have Aria answer using your documents as context, with citations showing exactly which document(s) an answer drew from
 - ✅ Supports any language including Bahasa Indonesia
 - ✅ Clear conversation history (`clear` command / "Clear Chat" button)
 - ✅ Clean terminal interface, a desktop GUI (Tkinter), **and** a browser-based Web App (Flask)
@@ -66,7 +66,7 @@ A dark-themed Tkinter chat window with:
 A browser-based chat page styled like a terminal window:
 - Terminal-style titlebar with an "online" status indicator
 - Color-coded chat bubbles (You / Aria / system / error)
-- Aria's reply **streams in live**, with a blinking cursor (▍) while it's still typing
+- Aria's reply **streams in live**, with a blinking cursor (▍) while it's still typing, then renders as formatted Markdown once complete — code blocks, lists, bold text, links, and headings all display properly instead of as raw `**`/`` ` ``/`-` syntax
 - "clear" button to reset the conversation
 - Fully responsive — works on desktop and mobile browsers
 
@@ -80,7 +80,7 @@ A browser-based chat page styled like a terminal window:
 | AI Model | LLaMA 3.3 70B (via Groq) |
 | API | Groq API (free tier), streaming responses |
 | Libraries | `groq`, `tkinter` (built-in), `flask` |
-| Frontend (Web) | HTML, CSS, vanilla JavaScript (fetch API + ReadableStream) |
+| Frontend (Web) | HTML, CSS, vanilla JavaScript (fetch API + ReadableStream), `marked` (Markdown rendering), `DOMPurify` (HTML sanitization) |
 | Interface | Terminal (CLI), Desktop GUI (Tkinter), Web App (Flask) |
 
 ---
@@ -213,7 +213,11 @@ The core chat logic lives in `chatbot_core.py` and is shared by the CLI and GUI 
 
 **Voice output** deliberately uses two different engines depending on environment: the Web App speaks replies with the browser's built-in `speechSynthesis` (free, client-side, zero extra dependencies), while the CLI and GUI — which have no browser — use `pyttsx3`, an offline Python TTS engine, so neither needs an API call or an internet connection to talk back.
 
-**RAG** works like this: uploaded documents (`.txt`/`.pdf`/`.docx`) are split into ~500-character chunks, each chunk is turned into a vector with a local `sentence-transformers` model (`all-MiniLM-L6-v2` — Groq doesn't host embedding models, only chat/Whisper/TTS), and stored in a persistent ChromaDB collection. Each chunk is also scanned with a heuristic regex for common prompt-injection phrasing (e.g. "ignore previous instructions", "you are now") and flagged accordingly — you're warned right after upload if anything suspicious was found, though this is a heuristic and not foolproof. When RAG is toggled on, every user message is first embedded and matched against that collection; the top 3 most relevant chunks are wrapped in `<untrusted_document_excerpts>` tags with an explicit system instruction that the content is reference data to consult, never commands to obey — even if a chunk contains text that looks like an instruction — before the request goes to Groq. The knowledge base is intentionally **shared and persistent across the whole app** — unlike conversation history, which is per-session — since it represents documents Aria "knows about" globally, not something tied to one particular chat.
+**RAG** works like this: uploaded documents (`.txt`/`.pdf`/`.docx`) are split into ~500-character chunks, each chunk is turned into a vector with a local `sentence-transformers` model (`all-MiniLM-L6-v2` — Groq doesn't host embedding models, only chat/Whisper/TTS), and stored in a persistent ChromaDB collection. Each chunk is also scanned with a heuristic regex for common prompt-injection phrasing (e.g. "ignore previous instructions", "you are now") and flagged accordingly — you're warned right after upload if anything suspicious was found, though this is a heuristic and not foolproof. When RAG is toggled on, every user message is first embedded and matched against that collection; the top 3 most relevant chunks are wrapped in `<untrusted_document_excerpts>` tags with an explicit system instruction that the content is reference data to consult, never commands to obey — even if a chunk contains text that looks like an instruction — before the request goes to Groq. Right alongside the reply, you'll also see which document(s) it drew from (e.g. "📚 Sumber: laporan.pdf (2 bagian)") — these citations come from the retrieval step itself (we already know exactly which chunks were fetched before the model even responds), not from asking the model to self-report, since a model can misremember or omit what it actually used. The knowledge base is intentionally **shared and persistent across the whole app** — unlike conversation history, which is per-session — since it represents documents Aria "knows about" globally, not something tied to one particular chat.
+
+**Persistence (Web App)**: the Flask app keeps an in-memory `sessions` dict for speed (so most requests never touch disk), but `db_utils.py` mirrors every message, persona choice, and RAG toggle into a local SQLite database (`aria_chat.db`) as it happens. If the Flask process restarts — a crash, a gunicorn worker recycling, stopping and restarting `python app.py` locally — `get_chatbot()` notices the session is missing from memory and rebuilds it from SQLite instead of starting over. This is genuinely useful for local development and crash recovery, but it isn't a substitute for a real database in a multi-server production setup, and it won't survive a full container redeploy on hosting tiers with ephemeral disks (see Deployment section).
+
+**Markdown rendering (Web App only)**: while Aria's reply is still streaming in, the chat bubble shows plain text with a blinking cursor — trying to render Markdown on a half-finished response is unreliable (an unclosed ` ``` ` code fence, for instance, looks broken until the rest of the text arrives). Once the stream finishes, the full text is run through [marked](https://github.com/markedjs/marked) to convert Markdown into HTML, then through [DOMPurify](https://github.com/cure53/DOMPurify) to strip anything unsafe before it's inserted into the page — the same defense-in-depth instinct as the RAG prompt-injection handling: don't trust text that ends up in the DOM, even if it's "just" the model's own reply, since it could echo something adversarial from an uploaded document. This is Web-App-only; the CLI and GUI aren't a natural fit for rendered Markdown (a terminal and a Tkinter text widget don't have an HTML renderer to hand off to), so they continue to show Aria's replies as plain text.
 
 ---
 
@@ -233,6 +237,7 @@ simple-chatbot/
 │   ├── app.py           # Flask routes (/, /chat, /clear, /persona, /download, /transcribe, /rag/*)
 │   ├── chatbot_core.py   # Local copy of the core logic
 │   ├── rag_utils.py      # Local copy of the RAG knowledge base logic
+│   ├── db_utils.py       # SQLite persistence for conversation history + session settings
 │   ├── requirements.txt  # flask, groq, chromadb, sentence-transformers, pypdf, python-docx (full, for local dev)
 │   ├── requirements-deploy.txt  # flask, groq, gunicorn only — lean build for RAG-disabled cloud deployments
 │   ├── Procfile          # gunicorn start command (used by platforms that read Procfiles)
@@ -285,7 +290,7 @@ The Web App version (`flask_app/`) can be deployed to [Render](https://render.co
 
 **Things to expect on the free tier:**
 - The service spins down after a period of no traffic, and the next request triggers a cold start (roughly 30-60 seconds). Normal behavior, not a bug — mention it if you're demoing live.
-- The container's disk is ephemeral: anything written to disk (temp audio files, temp document uploads) is deleted automatically after each request and wiped entirely on redeploy — this project's downloads (`/download`) generate the file on the fly rather than saving it server-side, so this doesn't cause any data loss.
+- The container's disk is ephemeral: anything written to disk (temp audio files, temp document uploads) is deleted automatically after each request and wiped entirely on redeploy — this project's downloads (`/download`) generate the file on the fly rather than saving it server-side, so this doesn't cause any data loss. The SQLite chat history (`aria_chat.db`) is subject to the same redeploy wipe — it survives process restarts within a running container, but not a fresh redeploy, unless you attach a persistent disk.
 - If you later want RAG enabled in production too, upgrade to a paid tier with more RAM, set `ENABLE_RAG=true`, and switch the build command back to the full `requirements.txt`.
 
 ---
@@ -317,9 +322,9 @@ On a deployed instance, the API key instead comes from the `GROQ_API_KEY` enviro
 - [x] Voice input and output
 - [x] RAG (Retrieval Augmented Generation) support
 - [x] Harden RAG against prompt injection from uploaded documents
-- [ ] Persistent chat history with SQLite (survives server restarts)
-- [ ] Citations in RAG answers (show which document/chunk was used)
-- [ ] Markdown rendering in chat bubbles (code blocks, lists, etc.)
+- [x] Persistent chat history with SQLite (survives process restarts)
+- [x] Citations in RAG answers (show which document/chunk was used)
+- [x] Markdown rendering in chat bubbles (code blocks, lists, etc.) — Web App only
 - [ ] Tool calling / function calling (e.g. web search, calculator)
 - [ ] Smarter RAG chunking (sentence/paragraph-aware, not fixed character count)
 - [ ] Per-user knowledge base isolation on the Web App (currently shared across all sessions)
@@ -338,7 +343,7 @@ On a deployed instance, the API key instead comes from the `GROQ_API_KEY` enviro
 Honest notes on where this project currently falls short of production-ready, for context on what the checklist above is addressing:
 
 - **Prompt injection mitigation in RAG is heuristic, not foolproof**: uploaded document chunks are scanned for common injection phrasing (e.g. "ignore previous instructions") and flagged to the person uploading them, and all retrieved excerpts are wrapped in `<untrusted_document_excerpts>` tags with an explicit system instruction that the content is data, not commands. This meaningfully raises the bar, but a sufficiently creative rephrasing could still slip past the regex heuristics — defense in depth (flagging + framing), not a guarantee.
-- **In-memory session storage**: the Flask app's `sessions` dict lives in memory only — a server restart wipes all active conversations and per-session toggles (RAG/speak state).
+- **In-memory session cache, backed by SQLite**: the Flask app's `sessions` dict is still in-memory for speed, but every message, persona choice, and RAG toggle is also written to a local SQLite database (`db_utils.py`) and restored automatically the next time that session is accessed. This survives a Flask process crash/restart on the same machine. It does **not** survive a full container redeploy on free hosting tiers (Render/Railway typically wipe the disk on redeploy unless you attach a paid persistent volume) — for that, you'd need either a persistent disk add-on or an external managed database.
 - **Duplicated core logic**: `chatbot_core.py` and `rag_utils.py` each exist as two identical copies (project root and `flask_app/`), since the Web App runs as a separate project. Any bugfix has to be applied to both.
 - **Shared knowledge base across sessions**: on the Web App, all browser sessions currently read from and write to the same ChromaDB knowledge base — there's no per-user isolation, so one user's uploaded documents are visible to everyone.
 - **No automated tests**: refactors currently rely on manual testing rather than a test suite.
