@@ -26,8 +26,8 @@ from pypdf import PdfReader
 import docx
 
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"  # small, fast, good enough for portfolio-scale RAG
-CHUNK_SIZE = 500     # characters per chunk
-CHUNK_OVERLAP = 50   # overlap between consecutive chunks, so context isn't cut mid-thought
+CHUNK_SIZE = 500                # target characters per chunk (soft limit — sentences are never split)
+CHUNK_OVERLAP_SENTENCES = 1     # sentence(s) carried into the next chunk, so context isn't lost at the boundary
 
 # ---------- Prompt injection detection ----------
 # Heuristic, not foolproof: catches common/obvious injection phrasing in
@@ -90,23 +90,70 @@ def load_document_text(filepath: str) -> str:
 
 # ---------- Chunking ----------
 
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list:
+def _split_paragraphs(text: str) -> list:
+    """Split on blank lines (one or more) between paragraphs."""
+    return [p.strip() for p in re.split(r"\n\s*\n+", text) if p.strip()]
+
+
+def _split_sentences(text: str) -> list:
     """
-    Simple fixed-size character chunking with overlap. Good enough for a
-    portfolio RAG pipeline — production systems usually chunk by sentence
-    or paragraph boundaries instead, but this keeps the logic easy to
-    reason about (and explain in an interview).
+    Lightweight sentence splitter: breaks after '.', '!', or '?' followed by
+    whitespace. This is a heuristic, not real NLP — it can be fooled by
+    abbreviations (e.g. "Mr. Smith" reads as two sentences) — but it avoids
+    pulling in a full NLP library (nltk/spacy) for what's a fairly small
+    accuracy gain in a portfolio RAG pipeline, and it never cuts a sentence
+    in half, which is the actual goal here.
+    """
+    text = text.strip()
+    if not text:
+        return []
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+
+
+def chunk_text(text: str, target_size: int = CHUNK_SIZE, overlap_sentences: int = CHUNK_OVERLAP_SENTENCES) -> list:
+    """
+    Split `text` into chunks that respect sentence (and paragraph) boundaries
+    instead of cutting at a fixed character offset mid-word or mid-sentence.
+
+    How it works: the text is split into paragraphs, then into sentences
+    within each paragraph, then sentences are greedily packed into a chunk
+    until adding the next one would push the chunk past `target_size`
+    characters — at which point a new chunk starts, carrying the last
+    `overlap_sentences` sentence(s) forward so context isn't lost right at
+    the boundary. A single sentence longer than `target_size` (rare, but
+    possible — a long run-on clause, for instance) becomes its own chunk
+    rather than being cut off mid-word, since respecting sentence boundaries
+    takes priority over hitting the exact target size.
     """
     text = text.strip()
     if not text:
         return []
 
+    all_sentences = []
+    for paragraph in _split_paragraphs(text):
+        all_sentences.extend(_split_sentences(paragraph))
+
+    if not all_sentences:
+        return []
+
     chunks = []
-    start = 0
-    while start < len(text):
-        end = start + chunk_size
-        chunks.append(text[start:end])
-        start += chunk_size - overlap
+    current = []
+    current_length = 0
+
+    for sentence in all_sentences:
+        sentence_length = len(sentence) + 1  # +1 accounts for the joining space
+
+        if current and current_length + sentence_length > target_size:
+            chunks.append(" ".join(current))
+            current = current[-overlap_sentences:] if overlap_sentences else []
+            current_length = sum(len(s) + 1 for s in current)
+
+        current.append(sentence)
+        current_length += sentence_length
+
+    if current:
+        chunks.append(" ".join(current))
+
     return chunks
 
 
