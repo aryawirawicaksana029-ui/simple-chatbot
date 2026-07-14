@@ -64,7 +64,7 @@ class AriaChatbot:
     """Wraps the Groq client and keeps conversation history."""
 
     def __init__(self, api_key: str = GROQ_API_KEY, model: str = MODEL_NAME, persona: str = "default",
-                 kb_path: str = "knowledge_base"):
+                 kb_path: str = "knowledge_base", kb_collection_name: str = "aria_documents"):
         self.client = Groq(api_key=api_key)
         self.model = model
         self.conversation_history = []
@@ -76,7 +76,7 @@ class AriaChatbot:
         # separate from conversation_history (this one chat's back-and-forth).
         # self.kb stays None entirely when RAG_AVAILABLE is False, so no
         # ChromaDB/embedding objects are ever created on this deployment.
-        self.kb = KnowledgeBase(persist_directory=kb_path) if RAG_AVAILABLE else None
+        self.kb = KnowledgeBase(persist_directory=kb_path, collection_name=kb_collection_name) if RAG_AVAILABLE else None
         self.rag_enabled = False
         self.last_rag_sources = []  # citations for the most recent chat_stream() call
 

@@ -160,18 +160,32 @@ def chunk_text(text: str, target_size: int = CHUNK_SIZE, overlap_sentences: int 
 # ---------- Knowledge base ----------
 
 class KnowledgeBase:
-    """Wraps a persistent ChromaDB collection + a local embedding model."""
+    """
+    Wraps a persistent ChromaDB collection + a local embedding model.
 
-    def __init__(self, persist_directory: str = "knowledge_base"):
+    `collection_name` scopes which documents this instance can see —
+    the CLI/GUI use the default shared collection (single local user, no
+    isolation needed), while the Web App gives each browser session its own
+    collection name (see chatbot_core.py / app.py) so one person's uploaded
+    documents are never visible to another person's session.
+    """
+
+    _shared_embedder = None  # class-level cache: see note in __init__ below
+
+    def __init__(self, persist_directory: str = "knowledge_base", collection_name: str = "aria_documents"):
         self.persist_directory = persist_directory
         os.makedirs(persist_directory, exist_ok=True)
 
         self.client = chromadb.PersistentClient(path=persist_directory)
-        self.collection = self.client.get_or_create_collection(name="aria_documents")
+        self.collection = self.client.get_or_create_collection(name=collection_name)
 
-        # Loaded once per process — this is the slow part on first run
-        # (downloads ~80MB of model weights, then caches them locally).
-        self.embedder = SentenceTransformer(EMBEDDING_MODEL_NAME)
+        # The embedding model is stateless (it doesn't hold per-user data,
+        # unlike the collection above), so it's safe — and much cheaper — to
+        # share ONE loaded copy across every KnowledgeBase instance in this
+        # process, rather than reloading ~80MB of weights per browser session.
+        if KnowledgeBase._shared_embedder is None:
+            KnowledgeBase._shared_embedder = SentenceTransformer(EMBEDDING_MODEL_NAME)
+        self.embedder = KnowledgeBase._shared_embedder
 
     def add_document(self, filepath: str) -> dict:
         """
@@ -249,6 +263,7 @@ class KnowledgeBase:
         return sorted(sources)
 
     def clear(self):
-        """Wipe the entire knowledge base — all documents, all chunks."""
-        self.client.delete_collection("aria_documents")
-        self.collection = self.client.get_or_create_collection(name="aria_documents")
+        """Wipe this knowledge base's collection — all documents, all chunks."""
+        collection_name = self.collection.name
+        self.client.delete_collection(collection_name)
+        self.collection = self.client.get_or_create_collection(name=collection_name)

@@ -52,7 +52,11 @@ def get_chatbot() -> AriaChatbot:
     session_id = session["session_id"]
 
     if session_id not in sessions:
-        aria = AriaChatbot()
+        # A dedicated collection name per session keeps one person's uploaded
+        # documents invisible to everyone else's session — the embedding
+        # MODEL is still shared process-wide (see KnowledgeBase in
+        # rag_utils.py), only the DATA is isolated per session.
+        aria = AriaChatbot(kb_collection_name=f"aria_docs_{session_id}")
 
         settings = db_utils.load_settings(session_id)
         if settings["persona_key"] == "custom" and settings["custom_prompt"]:
