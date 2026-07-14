@@ -10,9 +10,11 @@ const speakToggleBtn = document.getElementById("speak-toggle-btn");
 const uploadDocBtn = document.getElementById("upload-doc-btn");
 const docFileInput = document.getElementById("doc-file-input");
 const ragToggleBtn = document.getElementById("rag-toggle-btn");
+const toolsToggleBtn = document.getElementById("tools-toggle-btn");
 
 const STREAM_ERROR_PREFIX = "__ARIA_STREAM_ERROR__:";
 const STREAM_CITATIONS_PREFIX = "__ARIA_CITATIONS__:";
+const STREAM_TOOLS_PREFIX = "__ARIA_TOOLS__:";
 
 // ---------- Voice output (browser speechSynthesis) ----------
 let speakEnabled = false;
@@ -177,6 +179,11 @@ function setLoading(isLoading) {
   chatInput.disabled = isLoading;
 }
 
+function _earliestMarkerIndex(text) {
+  const indices = [text.indexOf(STREAM_CITATIONS_PREFIX), text.indexOf(STREAM_TOOLS_PREFIX)].filter((i) => i !== -1);
+  return indices.length ? Math.min(...indices) : -1;
+}
+
 async function sendMessage(message) {
   setLoading(true);
 
@@ -212,9 +219,9 @@ async function sendMessage(message) {
         continue; // keep draining the stream, but stop rendering it as a reply
       }
 
-      // Don't render the trailing citations JSON as if it were reply text.
-      const citationsIndex = fullText.indexOf(STREAM_CITATIONS_PREFIX);
-      const displayText = citationsIndex !== -1 ? fullText.slice(0, citationsIndex) : fullText;
+      // Don't render the trailing citations/tools JSON as if it were reply text.
+      const markerIndex = _earliestMarkerIndex(fullText);
+      const displayText = markerIndex !== -1 ? fullText.slice(0, markerIndex) : fullText;
       updateAriaStreamBubble(bubble, displayText);
     }
 
@@ -224,22 +231,47 @@ async function sendMessage(message) {
       return;
     }
 
-    const citationsIndex = fullText.indexOf(STREAM_CITATIONS_PREFIX);
+    const markerIndex = _earliestMarkerIndex(fullText);
     let replyText = fullText;
     let citations = null;
+    let toolCalls = null;
 
-    if (citationsIndex !== -1) {
-      replyText = fullText.slice(0, citationsIndex);
-      const citationsJson = fullText.slice(citationsIndex + STREAM_CITATIONS_PREFIX.length);
-      try {
-        citations = JSON.parse(citationsJson);
-      } catch (err) {
-        citations = null; // malformed — skip showing citations rather than breaking the reply
+    if (markerIndex !== -1) {
+      replyText = fullText.slice(0, markerIndex);
+      const trailer = fullText.slice(markerIndex);
+
+      const citationsIdx = trailer.indexOf(STREAM_CITATIONS_PREFIX);
+      const toolsIdx = trailer.indexOf(STREAM_TOOLS_PREFIX);
+
+      if (citationsIdx !== -1) {
+        const end = toolsIdx !== -1 && toolsIdx > citationsIdx ? toolsIdx : trailer.length;
+        try {
+          citations = JSON.parse(trailer.slice(citationsIdx + STREAM_CITATIONS_PREFIX.length, end));
+        } catch (err) {
+          citations = null; // malformed — skip rather than break the reply
+        }
+      }
+
+      if (toolsIdx !== -1) {
+        try {
+          toolCalls = JSON.parse(trailer.slice(toolsIdx + STREAM_TOOLS_PREFIX.length));
+        } catch (err) {
+          toolCalls = null;
+        }
       }
     }
 
     finalizeAriaStreamBubble(bubble, replyText);
     speakText(replyText);
+
+    if (toolCalls && toolCalls.length > 0) {
+      const parts = toolCalls.map((t) => {
+        if (t.name === "calculator") return `calculator(${t.arguments.expression})`;
+        if (t.name === "web_search") return `web_search("${t.arguments.query}")`;
+        return t.name;
+      });
+      appendMessage("system", `🛠️ Tools: ${parts.join(", ")}`);
+    }
 
     if (citations && citations.length > 0) {
       const parts = citations.map((c) => `${c.source} (${c.chunks_used} bagian)`);
@@ -342,6 +374,27 @@ personaSelect.addEventListener("change", async () => {
   } catch (err) {
     appendMessage("error", "Gagal menghubungi server untuk ganti persona.");
   }
+});
+
+// ---------- Tool calling (calculator, web search) ----------
+let toolsEnabled = true; // mirrors AriaChatbot's default (tools_enabled=True)
+
+toolsToggleBtn.addEventListener("click", async () => {
+  toolsEnabled = !toolsEnabled;
+  try {
+    const res = await fetch("/tools/toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: toolsEnabled }),
+    });
+    const data = await res.json();
+    toolsEnabled = data.tools_enabled;
+  } catch (err) {
+    appendMessage("error", "Gagal menghubungi server untuk toggle tools.");
+    toolsEnabled = !toolsEnabled; // revert on failure
+  }
+  toolsToggleBtn.textContent = toolsEnabled ? "🛠️ tools: on" : "🛠️ tools: off";
+  appendMessage("system", `🛠️ Tool calling (calculator + web search) ${toolsEnabled ? "diaktifkan" : "dimatikan"}.`);
 });
 
 // ---------- RAG (knowledge base) ----------

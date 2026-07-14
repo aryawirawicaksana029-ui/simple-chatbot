@@ -46,6 +46,13 @@ def handle_message(user_text: str):
         parts = [f"{c['source']} ({c['chunks_used']} bagian)" for c in citations]
         print(f"📚 Sumber: {', '.join(parts)}")
 
+    tool_calls = aria.get_tool_usage()
+    if tool_calls:
+        for tc in tool_calls:
+            args_str = ", ".join(f"{k}={v!r}" for k, v in tc["arguments"].items())
+            result_preview = tc["result"] if len(tc["result"]) <= 100 else tc["result"][:100] + "..."
+            print(f"🛠️  {tc['name']}({args_str}) → {result_preview}")
+
     if speak_enabled and full_reply.strip():
         voice_output.speak(full_reply)
 
@@ -66,6 +73,7 @@ def main():
     print("  Type 'rag add <filepath>' to add a .txt/.pdf/.docx file to Aria's knowledge base")
     print("  Type 'rag on' / 'rag off' to toggle whether Aria uses the knowledge base")
     print("  Type 'rag list' to see loaded documents, 'rag clear' to wipe the knowledge base")
+    print("  Type 'tools on' / 'tools off' to toggle calculator + web search tools (on by default)")
     print("=" * 45)
 
     while True:
@@ -148,6 +156,15 @@ def main():
                           f"prompt injection. Aria tetap akan memperlakukannya sebagai referensi, bukan instruksi.")
             except Exception as e:
                 print(f"\n⚠️  Gagal memproses dokumen: {e}")
+            continue
+
+        if user_input.lower() in ["tools on", "tools off"]:
+            if user_input.lower() == "tools on":
+                aria.enable_tools()
+            else:
+                aria.disable_tools()
+            status = "🔊 ON" if aria.tools_enabled else "🔇 OFF"
+            print(f"\n🛠️  Tools (calculator + web search): {status}")
             continue
 
         if user_input.lower() == "voice":

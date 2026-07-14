@@ -10,6 +10,7 @@ from datetime import datetime
 from groq import Groq
 from config import GROQ_API_KEY
 from rag_utils import KnowledgeBase
+from tools_utils import TOOLS, AVAILABLE_FUNCTIONS
 
 SYSTEM_PROMPT = (
     "You are a helpful assistant named Aria. "
@@ -58,6 +59,12 @@ class AriaChatbot:
         self.kb = KnowledgeBase(persist_directory=kb_path)
         self.rag_enabled = False
         self.last_rag_sources = []  # citations for the most recent chat_stream() call
+
+        # Tool calling: on by default since these tools (calculator, web search)
+        # are safe/read-only. self.last_tool_calls records what was used on the
+        # most recent turn, for the UI to display.
+        self.tools_enabled = True
+        self.last_tool_calls = []
 
     def set_persona(self, persona) -> str:
         """
@@ -151,7 +158,67 @@ class AriaChatbot:
                 })
 
         messages += self.conversation_history
+        self.last_tool_calls = []  # reset each call; only populated if a tool actually ran
 
+        # ---------- Tool calling (optional, non-streamed decision round) ----------
+        # Deciding whether to call a tool needs the complete response in one
+        # piece (tool name + full JSON arguments), which streaming complicates
+        # for little benefit here — this decision call is fast on Groq anyway.
+        # Only the final answer (after any tool results are known) streams to
+        # the user. This project only does one round of tool calls per turn
+        # (no chained/recursive tool use) to keep the flow easy to follow.
+        if self.tools_enabled:
+            decision = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=TOOLS,
+                tool_choice="auto",
+                stream=False,
+            )
+            decision_message = decision.choices[0].message
+
+            if decision_message.tool_calls:
+                messages.append({
+                    "role": "assistant",
+                    "content": decision_message.content or "",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                        }
+                        for tc in decision_message.tool_calls
+                    ],
+                })
+
+                for tc in decision_message.tool_calls:
+                    func = AVAILABLE_FUNCTIONS.get(tc.function.name)
+                    try:
+                        args = json.loads(tc.function.arguments)
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+
+                    if func:
+                        try:
+                            result = func(**args)
+                        except Exception as e:
+                            result = f"Error running tool: {e}"
+                    else:
+                        result = f"Error: unknown tool '{tc.function.name}'"
+
+                    self.last_tool_calls.append({
+                        "name": tc.function.name,
+                        "arguments": args,
+                        "result": result,
+                    })
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result,
+                    })
+
+        # ---------- Final streamed response ----------
         stream = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
@@ -185,6 +252,20 @@ class AriaChatbot:
             counts[item["source"]] = counts.get(item["source"], 0) + 1
 
         return [{"source": source, "chunks_used": count} for source, count in counts.items()]
+
+    # ---------- Tool calling (calculator, web search) ----------
+
+    def enable_tools(self):
+        self.tools_enabled = True
+
+    def disable_tools(self):
+        self.tools_enabled = False
+
+    def get_tool_usage(self) -> list:
+        """Return the tools used (if any) during the most recent chat_stream()
+        call, each as {"name": str, "arguments": dict, "result": str}. Empty
+        list if tools were off or the model didn't need any that turn."""
+        return self.last_tool_calls
 
     def transcribe_audio(self, filepath: str, language: str = None) -> str:
         """

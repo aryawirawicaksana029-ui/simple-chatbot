@@ -35,17 +35,17 @@ sessions: dict[str, AriaChatbot] = {}
 
 
 def _persist_settings(aria: AriaChatbot, session_id: str):
-    """Save this session's current persona + RAG toggle to SQLite."""
+    """Save this session's current persona, RAG toggle, and tools toggle to SQLite."""
     persona_key = aria.persona_name
     custom_prompt = aria.system_prompt if persona_key == "custom" else None
-    db_utils.save_settings(session_id, persona_key, custom_prompt, aria.rag_enabled)
+    db_utils.save_settings(session_id, persona_key, custom_prompt, aria.rag_enabled, aria.tools_enabled)
 
 
 def get_chatbot() -> AriaChatbot:
     """Get (or create) the AriaChatbot tied to the current browser session.
     On first access after a process restart, this restores conversation
-    history and settings (persona, RAG toggle) from SQLite instead of
-    starting the person's session over from scratch."""
+    history and settings (persona, RAG toggle, tools toggle) from SQLite
+    instead of starting the person's session over from scratch."""
     if "session_id" not in session:
         session["session_id"] = str(uuid.uuid4())
 
@@ -62,6 +62,9 @@ def get_chatbot() -> AriaChatbot:
 
         if settings["rag_enabled"] and RAG_AVAILABLE:
             aria.enable_rag()
+
+        if not settings["tools_enabled"]:
+            aria.disable_tools()  # AriaChatbot defaults tools_enabled=True already
 
         aria.conversation_history = db_utils.load_messages(session_id)
 
@@ -85,6 +88,7 @@ def config_info():
 
 STREAM_ERROR_PREFIX = "__ARIA_STREAM_ERROR__:"
 STREAM_CITATIONS_PREFIX = "__ARIA_CITATIONS__:"
+STREAM_TOOLS_PREFIX = "__ARIA_TOOLS__:"
 
 
 @app.route("/chat", methods=["POST"])
@@ -122,6 +126,10 @@ def chat():
             citations = aria.get_rag_citations()
             if citations:
                 yield f"{STREAM_CITATIONS_PREFIX}{json.dumps(citations)}"
+
+            tool_calls = aria.get_tool_usage()
+            if tool_calls:
+                yield f"{STREAM_TOOLS_PREFIX}{json.dumps(tool_calls)}"
         except Exception as e:
             yield f"{STREAM_ERROR_PREFIX}Failed to reach Groq API: {e}"
 
@@ -179,6 +187,24 @@ def rag_toggle():
     _persist_settings(aria, session_id)
 
     return jsonify({"rag_enabled": aria.rag_enabled})
+
+
+@app.route("/tools/toggle", methods=["POST"])
+def tools_toggle():
+    """Enable/disable tool calling (calculator + web search) for the current session."""
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get("enabled"))
+
+    aria = get_chatbot()
+    session_id = session["session_id"]
+    if enabled:
+        aria.enable_tools()
+    else:
+        aria.disable_tools()
+
+    _persist_settings(aria, session_id)
+
+    return jsonify({"tools_enabled": aria.tools_enabled})
 
 
 @app.route("/rag/documents", methods=["GET"])

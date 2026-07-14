@@ -43,6 +43,7 @@ class AriaGUI:
         self.is_recording = False
         self.speak_enabled = False  # toggled via the 🔇/🔊 Speak button
         self.rag_enabled = False    # toggled via the RAG button
+        self.tools_enabled = True   # mirrors AriaChatbot's default (tools on by default)
 
         self._build_ui()
 
@@ -106,6 +107,14 @@ class AriaGUI:
             cursor="hand2"
         )
         add_doc_btn.pack(side="right", padx=(0, 8))
+
+        self.tools_btn = tk.Button(
+            header, text="🛠️ Tools: On", command=self.toggle_tools,
+            bg=BTN_COLOR, fg=TEXT_COLOR, font=FONT_MAIN,
+            activebackground=BTN_HOVER, relief="flat", padx=10, pady=3,
+            cursor="hand2"
+        )
+        self.tools_btn.pack(side="right", padx=(0, 8))
 
         # Chat display area
         self.chat_area = scrolledtext.ScrolledText(
@@ -231,6 +240,13 @@ class AriaGUI:
                 parts = [f"{c['source']} ({c['chunks_used']} bagian)" for c in citations]
                 self._append_system(f"📚 Sumber: {', '.join(parts)}")
 
+            tool_calls = self.aria.get_tool_usage()
+            if tool_calls:
+                for tc in tool_calls:
+                    args_str = ", ".join(f"{k}={v!r}" for k, v in tc["arguments"].items())
+                    result_preview = tc["result"] if len(tc["result"]) <= 100 else tc["result"][:100] + "..."
+                    self._append_system(f"🛠️ {tc['name']}({args_str}) → {result_preview}")
+
             if self.speak_enabled and full_reply.strip():
                 # pyttsx3's runAndWait() blocks, so speak on a background
                 # thread to keep the GUI responsive.
@@ -266,6 +282,16 @@ class AriaGUI:
         label = "📚 RAG: On" if self.rag_enabled else "📚 RAG: Off"
         self.rag_btn.configure(text=label)
         self._append_system(f"📚 RAG (knowledge base) {'diaktifkan' if self.rag_enabled else 'dimatikan'}.")
+
+    def toggle_tools(self):
+        self.tools_enabled = not self.tools_enabled
+        if self.tools_enabled:
+            self.aria.enable_tools()
+        else:
+            self.aria.disable_tools()
+        label = "🛠️ Tools: On" if self.tools_enabled else "🛠️ Tools: Off"
+        self.tools_btn.configure(text=label)
+        self._append_system(f"🛠️ Tools (calculator + web search) {'diaktifkan' if self.tools_enabled else 'dimatikan'}.")
 
     def add_document(self):
         filepath = filedialog.askopenfilename(

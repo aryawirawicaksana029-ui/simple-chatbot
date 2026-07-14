@@ -23,6 +23,7 @@ Now available in three versions:
 - ✅ **Voice input** — speak to Aria instead of typing; audio is transcribed via Groq's Whisper (`whisper-large-v3`), across all three interfaces
 - ✅ **Voice output** — Aria can read her replies aloud: browser `speechSynthesis` on the Web App, offline `pyttsx3` on CLI/GUI
 - ✅ **RAG (Retrieval Augmented Generation)** — upload `.txt`/`.pdf`/`.docx` documents to a shared knowledge base (ChromaDB + local `sentence-transformers` embeddings); toggle it on to have Aria answer using your documents as context, with citations showing exactly which document(s) an answer drew from
+- ✅ **Tool calling (calculator + web search)** — Aria can call a safe calculator and a free web search tool mid-conversation when a question calls for it, and shows exactly which tool ran and with what arguments
 - ✅ Supports any language including Bahasa Indonesia
 - ✅ Clear conversation history (`clear` command / "Clear Chat" button)
 - ✅ Clean terminal interface, a desktop GUI (Tkinter), **and** a browser-based Web App (Flask)
@@ -79,7 +80,7 @@ A browser-based chat page styled like a terminal window:
 | Language | Python 3.x |
 | AI Model | LLaMA 3.3 70B (via Groq) |
 | API | Groq API (free tier), streaming responses |
-| Libraries | `groq`, `tkinter` (built-in), `flask` |
+| Libraries | `groq`, `tkinter` (built-in), `flask`, `requests` (web search tool) |
 | Frontend (Web) | HTML, CSS, vanilla JavaScript (fetch API + ReadableStream), `marked` (Markdown rendering), `DOMPurify` (HTML sanitization) |
 | Interface | Terminal (CLI), Desktop GUI (Tkinter), Web App (Flask) |
 
@@ -157,6 +158,7 @@ Then open **http://127.0.0.1:5000** in your browser.
 | `rag on` / `rag off` | Toggle whether Aria uses the knowledge base to answer |
 | `rag list` | List documents currently in the knowledge base |
 | `rag clear` | Wipe the entire knowledge base |
+| `tools on` / `tools off` | Toggle calculator + web search tool calling (on by default) |
 | `quit` / `exit` | Exit the chatbot |
 
 ## 🖱️ Controls (GUI)
@@ -170,6 +172,7 @@ Then open **http://127.0.0.1:5000** in your browser.
 | 🔇/🔊 Speak button | Toggle Aria reading her replies aloud (offline, via pyttsx3) |
 | 📎 Add Doc button | Upload a `.txt`/`.pdf`/`.docx` file to the knowledge base via a file dialog |
 | 📚 RAG button | Toggle whether Aria uses the knowledge base to answer |
+| 🛠️ Tools button | Toggle calculator + web search tool calling (on by default) |
 | Clear Chat button | Clear conversation history and chat log |
 
 ## 🌐 Controls (Web App)
@@ -183,6 +186,7 @@ Then open **http://127.0.0.1:5000** in your browser.
 | 🔇/🔊 speak button | Toggle Aria reading her replies aloud, using the browser's built-in speechSynthesis |
 | 📎 upload button | Upload a `.txt`/`.pdf`/`.docx` file to the shared knowledge base |
 | 📚 rag button | Toggle whether Aria uses the knowledge base for your session |
+| 🛠️ tools button | Toggle calculator + web search tool calling for your session |
 | clear button | Clear conversation history for your browser session |
 
 ---
@@ -219,6 +223,8 @@ The core chat logic lives in `chatbot_core.py` and is shared by the CLI and GUI 
 
 **Markdown rendering (Web App only)**: while Aria's reply is still streaming in, the chat bubble shows plain text with a blinking cursor — trying to render Markdown on a half-finished response is unreliable (an unclosed ` ``` ` code fence, for instance, looks broken until the rest of the text arrives). Once the stream finishes, the full text is run through [marked](https://github.com/markedjs/marked) to convert Markdown into HTML, then through [DOMPurify](https://github.com/cure53/DOMPurify) to strip anything unsafe before it's inserted into the page — the same defense-in-depth instinct as the RAG prompt-injection handling: don't trust text that ends up in the DOM, even if it's "just" the model's own reply, since it could echo something adversarial from an uploaded document. This is Web-App-only; the CLI and GUI aren't a natural fit for rendered Markdown (a terminal and a Tkinter text widget don't have an HTML renderer to hand off to), so they continue to show Aria's replies as plain text.
 
+**Tool calling** gives Aria two abilities beyond plain chat: a `calculator` (safe arithmetic, evaluated via Python's `ast` module rather than `eval()` — no way for a crafted expression to run arbitrary code) and `web_search` (DuckDuckGo's free Instant Answer API, no API key needed, though it only reliably answers factual/definitional queries and often comes back empty for news or highly specific lookups). The flow is a **non-streamed decision round, then a streamed final answer**: Aria first asks Groq (without streaming) whether a tool is needed for this message; deciding needs the complete tool name and JSON arguments in one piece, which streaming would fragment across many chunks for little benefit here. If a tool is called, it runs locally, its result is added to the conversation, and only *then* does the final, tool-informed reply stream to the UI as usual. Tool calling only does one round per turn — no chained/recursive tool use — to keep the flow easy to follow. Like RAG's citations, which tool ran (and with what arguments) is shown directly in the UI rather than relying on the model to mention it, and it's on by default since both tools are safe/read-only; toggle it off if you'd rather avoid the extra round-trip latency it adds to every message.
+
 ---
 
 ## 📁 Project Structure
@@ -232,11 +238,13 @@ simple-chatbot/
 ├── voice_input.py      # Mic recording helper (CLI/GUI only, uses sounddevice)
 ├── voice_output.py     # Offline text-to-speech helper (CLI/GUI only, uses pyttsx3)
 ├── rag_utils.py         # RAG knowledge base (ChromaDB + sentence-transformers)
+├── tools_utils.py       # Tool calling: calculator + web search (calculate(), web_search())
 ├── requirements.txt    # groq, sounddevice, scipy, pyttsx3, chromadb, sentence-transformers, pypdf, python-docx
 ├── flask_app/          # Web App version (Flask)
 │   ├── app.py           # Flask routes (/, /chat, /clear, /persona, /download, /transcribe, /rag/*)
 │   ├── chatbot_core.py   # Local copy of the core logic
 │   ├── rag_utils.py      # Local copy of the RAG knowledge base logic
+│   ├── tools_utils.py    # Local copy of the tool calling logic
 │   ├── db_utils.py       # SQLite persistence for conversation history + session settings
 │   ├── requirements.txt  # flask, groq, chromadb, sentence-transformers, pypdf, python-docx (full, for local dev)
 │   ├── requirements-deploy.txt  # flask, groq, gunicorn only — lean build for RAG-disabled cloud deployments
@@ -325,7 +333,7 @@ On a deployed instance, the API key instead comes from the `GROQ_API_KEY` enviro
 - [x] Persistent chat history with SQLite (survives process restarts)
 - [x] Citations in RAG answers (show which document/chunk was used)
 - [x] Markdown rendering in chat bubbles (code blocks, lists, etc.) — Web App only
-- [ ] Tool calling / function calling (e.g. web search, calculator)
+- [x] Tool calling / function calling (e.g. web search, calculator)
 - [ ] Smarter RAG chunking (sentence/paragraph-aware, not fixed character count)
 - [ ] Per-user knowledge base isolation on the Web App (currently shared across all sessions)
 - [ ] Refactor `chatbot_core.py` / `rag_utils.py` into a shared package instead of duplicated copies
@@ -344,7 +352,8 @@ Honest notes on where this project currently falls short of production-ready, fo
 
 - **Prompt injection mitigation in RAG is heuristic, not foolproof**: uploaded document chunks are scanned for common injection phrasing (e.g. "ignore previous instructions") and flagged to the person uploading them, and all retrieved excerpts are wrapped in `<untrusted_document_excerpts>` tags with an explicit system instruction that the content is data, not commands. This meaningfully raises the bar, but a sufficiently creative rephrasing could still slip past the regex heuristics — defense in depth (flagging + framing), not a guarantee.
 - **In-memory session cache, backed by SQLite**: the Flask app's `sessions` dict is still in-memory for speed, but every message, persona choice, and RAG toggle is also written to a local SQLite database (`db_utils.py`) and restored automatically the next time that session is accessed. This survives a Flask process crash/restart on the same machine. It does **not** survive a full container redeploy on free hosting tiers (Render/Railway typically wipe the disk on redeploy unless you attach a paid persistent volume) — for that, you'd need either a persistent disk add-on or an external managed database.
-- **Duplicated core logic**: `chatbot_core.py` and `rag_utils.py` each exist as two identical copies (project root and `flask_app/`), since the Web App runs as a separate project. Any bugfix has to be applied to both.
+- **Duplicated core logic**: `chatbot_core.py`, `rag_utils.py`, and `tools_utils.py` each exist as two identical copies (project root and `flask_app/`), since the Web App runs as a separate project. Any bugfix has to be applied to both.
 - **Shared knowledge base across sessions**: on the Web App, all browser sessions currently read from and write to the same ChromaDB knowledge base — there's no per-user isolation, so one user's uploaded documents are visible to everyone.
 - **No automated tests**: refactors currently rely on manual testing rather than a test suite.
 - **Fixed-duration voice recording**: CLI/GUI voice input always records for a flat 5 seconds regardless of how long the person actually speaks.
+- **Tool calling adds latency and API usage**: since tools are on by default, every message pays for an extra non-streamed "decision" round-trip to Groq before the real answer streams — noticeable but usually small given Groq's speed. `web_search` is also limited to DuckDuckGo's free Instant Answer API, which only reliably covers factual/definitional queries; toggle tools off for pure chit-chat if you'd rather skip the extra round-trip, or if you're hitting Groq's rate limits.
