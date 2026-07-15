@@ -11,7 +11,7 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 from datetime import datetime
 
-from chatbot_core import AriaChatbot, PERSONAS
+from aria_core.chatbot_core import AriaChatbot, PERSONAS
 from voice_input import record_audio
 import voice_output
 

@@ -37,9 +37,9 @@ CHUNK_OVERLAP_SENTENCES = 1     # sentence(s) carried into the next chunk, so co
 # regardless of whether anything gets flagged here — defense in depth, not
 # a single point of failure.
 INJECTION_PATTERNS = [
-    r"ignore (all|any|the)?\s*(previous|prior|above|earlier)\s*instructions",
-    r"disregard (all|any|the)?\s*(previous|prior|above|earlier)\s*instructions",
-    r"forget (everything|all|your)\s*(instructions|prompt)",
+    r"ignore (all|any|the)?\s*(previous|prior|above|earlier)\s*(instructions)?",
+    r"disregard (all|any|the)?\s*(previous|prior|above|earlier)\s*(instructions)?",
+    r"forget (everything|all|your)\s*(instructions|prompt)?",
     r"new instructions?:",
     r"system prompt",
     r"you are now",

@@ -1,7 +1,9 @@
 """
 chatbot_core.py
 Core logic for ARIA chatbot (Groq + LLaMA 3.3 70B).
-Shared by both the CLI (chatbot.py) and GUI (chatbot_gui.py) versions.
+Shared by all three interfaces: the CLI (chatbot.py), the GUI
+(chatbot_gui.py), and the Web App (flask_app/app.py) — this used to be two
+separate, hand-synced copies (see aria_core/__init__.py for why that changed).
 """
 
 import os
@@ -11,8 +13,12 @@ from datetime import datetime
 from groq import Groq
 
 # Falls back to an environment variable if config.py isn't present — which is
-# the case on Render/Railway, since config.py is gitignored and never pushed.
-# Locally, config.py (with your real key) takes priority as before.
+# the case on Render/Railway/Koyeb, since config.py is gitignored and never
+# pushed. Locally, config.py (with your real key) takes priority as before.
+# Note: this import is resolved via sys.path, not relative to this package,
+# so the CLI/GUI (run from the project root) pick up the root config.py,
+# while the Web App (run from flask_app/) picks up flask_app/config.py —
+# each entry point keeps its own key.
 try:
     from config import GROQ_API_KEY
 except ImportError:
@@ -22,13 +28,14 @@ except ImportError:
 # low-memory deployments (e.g. Render's free 512MB tier): sentence-transformers
 # pulls in torch, which costs a few hundred MB of RAM just from being
 # imported — whether or not RAG is ever actually used. Skipping the import
-# is the only way to actually reclaim that memory.
+# is the only way to actually reclaim that memory. The CLI/GUI never set
+# this env var, so RAG_AVAILABLE defaults to True there, same as before.
 RAG_AVAILABLE = os.environ.get("ENABLE_RAG", "true").lower() != "false"
 
 if RAG_AVAILABLE:
-    from rag_utils import KnowledgeBase
+    from .rag_utils import KnowledgeBase
 
-from tools_utils import TOOLS, AVAILABLE_FUNCTIONS
+from .tools_utils import TOOLS, AVAILABLE_FUNCTIONS
 
 SYSTEM_PROMPT = (
     "You are a helpful assistant named Aria. "
@@ -72,10 +79,13 @@ class AriaChatbot:
         self.system_prompt = SYSTEM_PROMPT
         self.set_persona(persona)
 
-        # RAG: the knowledge base is shared/global (documents Aria "knows"),
-        # separate from conversation_history (this one chat's back-and-forth).
-        # self.kb stays None entirely when RAG_AVAILABLE is False, so no
-        # ChromaDB/embedding objects are ever created on this deployment.
+        # RAG: the knowledge base is local to this AriaChatbot instance.
+        # kb_collection_name lets each caller decide the isolation scope —
+        # the CLI/GUI use the default shared collection (single local user,
+        # no isolation needed), while the Web App gives each browser session
+        # its own collection name (see flask_app/app.py). self.kb stays None
+        # entirely when RAG_AVAILABLE is False, so no ChromaDB/embedding
+        # objects are ever created on RAG-disabled deployments.
         self.kb = KnowledgeBase(persist_directory=kb_path, collection_name=kb_collection_name) if RAG_AVAILABLE else None
         self.rag_enabled = False
         self.last_rag_sources = []  # citations for the most recent chat_stream() call
@@ -192,17 +202,29 @@ class AriaChatbot:
         # Only the final answer (after any tool results are known) streams to
         # the user. This project only does one round of tool calls per turn
         # (no chained/recursive tool use) to keep the flow easy to follow.
+        decision_message = None
         if self.tools_enabled:
-            decision = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                tools=TOOLS,
-                tool_choice="auto",
-                stream=False,
-            )
-            decision_message = decision.choices[0].message
+            try:
+                decision = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    tools=TOOLS,
+                    tool_choice="auto",
+                    stream=False,
+                )
+                decision_message = decision.choices[0].message
+            except Exception:
+                # The model occasionally emits a malformed tool-call attempt
+                # (e.g. literal text like "<function=web_search ...>") instead
+                # of a proper structured tool_calls response, which Groq's API
+                # rejects outright (400 "tool_use_failed"). Rather than letting
+                # that take down the whole reply, fall back to answering this
+                # turn without tools — decision_message stays None, so the
+                # "if decision_message and ..." check below is skipped and we
+                # go straight to a normal streamed answer.
+                decision_message = None
 
-            if decision_message.tool_calls:
+            if decision_message and decision_message.tool_calls:
                 messages.append({
                     "role": "assistant",
                     "content": decision_message.content or "",

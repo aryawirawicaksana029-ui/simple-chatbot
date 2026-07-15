@@ -8,17 +8,31 @@ Then open http://127.0.0.1:5000 in your browser.
 """
 
 import os
+import sys
 import uuid
 import tempfile
 import json
 from datetime import datetime
+
+# chatbot_core.py / rag_utils.py / tools_utils.py used to be duplicated here
+# (a whole second copy of each file, kept in sync by hand — see README "Known
+# Limitations" history for how well that went). They now live once, in
+# aria_core/ at the project root, one directory up from this file. This makes
+# that package importable as `aria_core.<module>`.
+#
+# APPEND (not insert at index 0!) matters here: this script's own directory
+# (flask_app/) is already on sys.path and must stay searched FIRST, so a
+# local `import config` still finds flask_app/config.py — not the root
+# project's config.py, which is a different Groq API key. Appending only
+# adds aria_core's location as a fallback for names not found locally.
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from flask import (
     Flask, render_template, request, jsonify, session,
     Response, stream_with_context, make_response
 )
 
-from chatbot_core import AriaChatbot, PERSONAS, RAG_AVAILABLE
+from aria_core.chatbot_core import AriaChatbot, PERSONAS, RAG_AVAILABLE
 import db_utils
 
 app = Flask(__name__)

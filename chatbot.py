@@ -6,7 +6,7 @@ Terminal (CLI) version of ARIA chatbot.
 import os
 from datetime import datetime
 
-from chatbot_core import AriaChatbot, PERSONAS
+from aria_core.chatbot_core import AriaChatbot, PERSONAS
 from voice_input import record_audio
 import voice_output
 

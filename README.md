@@ -232,35 +232,52 @@ The core chat logic lives in `chatbot_core.py` and is shared by the CLI and GUI 
 ```
 simple-chatbot/
 │
-├── chatbot_core.py     # Shared core logic (Groq client, history, chat(), transcribe_audio())
-├── chatbot.py          # Terminal (CLI) version
-├── chatbot_gui.py      # GUI version (Tkinter)
-├── voice_input.py      # Mic recording helper (CLI/GUI only, uses sounddevice)
-├── voice_output.py     # Offline text-to-speech helper (CLI/GUI only, uses pyttsx3)
-├── rag_utils.py         # RAG knowledge base (ChromaDB + sentence-transformers)
-├── tools_utils.py       # Tool calling: calculator + web search (calculate(), web_search())
-├── requirements.txt    # groq, sounddevice, scipy, pyttsx3, chromadb, sentence-transformers, pypdf, python-docx
-├── flask_app/          # Web App version (Flask)
-│   ├── app.py           # Flask routes (/, /chat, /clear, /persona, /download, /transcribe, /rag/*)
-│   ├── chatbot_core.py   # Local copy of the core logic
-│   ├── rag_utils.py      # Local copy of the RAG knowledge base logic
-│   ├── tools_utils.py    # Local copy of the tool calling logic
-│   ├── db_utils.py       # SQLite persistence for conversation history + session settings
-│   ├── requirements.txt  # flask, groq, chromadb, sentence-transformers, pypdf, python-docx (full, for local dev)
-│   ├── requirements-deploy.txt  # flask, groq, gunicorn only — lean build for RAG-disabled cloud deployments
-│   ├── Procfile          # gunicorn start command (used by platforms that read Procfiles)
+├── aria_core/                 # Shared package — imported by ALL THREE interfaces, one copy of each file
+│   ├── __init__.py             # explains how flask_app/ reaches this package (sys.path)
+│   ├── chatbot_core.py         # Groq client, history, chat_stream(), RAG/tools orchestration
+│   ├── rag_utils.py            # RAG knowledge base (ChromaDB + sentence-transformers)
+│   └── tools_utils.py          # Tool calling: calculator + web search
+├── chatbot.py                 # Terminal (CLI) version
+├── chatbot_gui.py             # GUI version (Tkinter)
+├── voice_input.py             # Mic recording helper (CLI/GUI only, uses sounddevice)
+├── voice_output.py            # Offline text-to-speech helper (CLI/GUI only, uses pyttsx3)
+├── tests/                     # Unit tests (unittest + unittest.mock, zero extra dependencies)
+│   ├── test_rag_utils.py       # chunking, injection detection, KnowledgeBase isolation
+│   ├── test_tools_utils.py     # calculator safety, web search (mocked network)
+│   └── test_chatbot_core.py    # persona, history, RAG context injection, tool-call orchestration
+├── requirements.txt           # groq, sounddevice, scipy, pyttsx3, chromadb, sentence-transformers, pypdf, python-docx
+├── flask_app/                 # Web App version (Flask) — a separate project one directory down
+│   ├── app.py                  # Flask routes; appends the project root to sys.path so it can `import aria_core`
+│   ├── db_utils.py             # SQLite persistence for conversation history + session settings (Web-App-only, not shared)
+│   ├── requirements.txt        # flask, groq, chromadb, sentence-transformers, pypdf, python-docx (full, for local dev)
+│   ├── requirements-deploy.txt # flask, groq, gunicorn only — lean build for RAG-disabled cloud deployments
+│   ├── Procfile                # gunicorn start command (used by platforms that read Procfiles)
 │   ├── templates/
 │   │   └── index.html
 │   └── static/
 │       ├── style.css
-│       └── script.js       # includes MediaRecorder (voice input) + speechSynthesis (voice output) + RAG upload/toggle
-├── knowledge_base/      # ChromaDB persisted data (auto-created, git-ignored)
-├── .gitignore          # Excludes config.py, __pycache__, knowledge_base/, chat_history/
-└── README.md            # Project documentation
+│       └── script.js           # includes MediaRecorder (voice input) + speechSynthesis (voice output) + RAG upload/toggle
+├── knowledge_base/            # ChromaDB persisted data (auto-created, git-ignored)
+├── .gitignore                 # Excludes config.py, __pycache__, knowledge_base/, chat_history/, *.db
+└── README.md                   # Project documentation
 # Not uploaded to GitHub:
-├── config.py           # Groq API key for CLI/GUI (keep secret!)
-└── flask_app/config.py # Groq API key for the Web App (keep secret!)
+├── config.py                  # Groq API key for CLI/GUI (keep secret!)
+└── flask_app/config.py        # Groq API key for the Web App (keep secret! — a separate key/file from the one above)
 ```
+
+`aria_core/` used to be two hand-synced copies of the same three files (project root and `flask_app/`) — a real, recurring source of bugs, since any fix had to be applied twice and it was easy to forget one side. Now there's exactly one copy of each. The Web App reaches it by appending the project root to `sys.path` at the top of `app.py` (see the comment there); it's an *append*, not an *insert at index 0*, specifically so `flask_app/config.py` still takes priority over the root's `config.py` for that one directory — each interface keeps its own Groq API key.
+
+---
+
+## 🧪 Running Tests
+
+`tests/` has 50 unit tests covering `aria_core`'s chat orchestration, RAG (chunking, prompt-injection detection, citations), and tool calling — using Python's built-in `unittest` and `unittest.mock`, so no extra dependency is needed just to run them.
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The tests mock out Groq, ChromaDB, and the embedding model, so they run in well under a second and need no API key, no network access, and no model download — what's under test is ARIA's own orchestration logic (does `chat_stream()` build the right messages? does a flagged RAG chunk add the security warning? does a malformed tool-call response get caught instead of crashing the reply?), not whether Groq or ChromaDB themselves work correctly.
 
 ---
 
@@ -336,8 +353,8 @@ On a deployed instance, the API key instead comes from the `GROQ_API_KEY` enviro
 - [x] Tool calling / function calling (e.g. web search, calculator)
 - [x] Smarter RAG chunking (sentence/paragraph-aware, not fixed character count)
 - [x] Per-user knowledge base isolation on the Web App (was shared across all sessions)
-- [ ] Refactor `chatbot_core.py` / `rag_utils.py` into a shared package instead of duplicated copies
-- [ ] Unit tests for core chat and RAG logic
+- [x] Refactor `chatbot_core.py` / `rag_utils.py` into a shared package instead of duplicated copies
+- [x] Unit tests for core chat and RAG logic
 - [x] Deployment guide so the Web App is reachable beyond localhost (Render)
 - [ ] Dockerize the project (for more portable/consistent deployment across providers)
 - [ ] Voice activity detection for voice input (instead of a fixed 5-second recording)
@@ -352,8 +369,8 @@ Honest notes on where this project currently falls short of production-ready, fo
 
 - **Prompt injection mitigation in RAG is heuristic, not foolproof**: uploaded document chunks are scanned for common injection phrasing (e.g. "ignore previous instructions") and flagged to the person uploading them, and all retrieved excerpts are wrapped in `<untrusted_document_excerpts>` tags with an explicit system instruction that the content is data, not commands. This meaningfully raises the bar, but a sufficiently creative rephrasing could still slip past the regex heuristics — defense in depth (flagging + framing), not a guarantee.
 - **In-memory session cache, backed by SQLite**: the Flask app's `sessions` dict is still in-memory for speed, but every message, persona choice, and RAG toggle is also written to a local SQLite database (`db_utils.py`) and restored automatically the next time that session is accessed. This survives a Flask process crash/restart on the same machine. It does **not** survive a full container redeploy on free hosting tiers (Render/Railway typically wipe the disk on redeploy unless you attach a paid persistent volume) — for that, you'd need either a persistent disk add-on or an external managed database.
-- **Duplicated core logic**: `chatbot_core.py`, `rag_utils.py`, and `tools_utils.py` each exist as two identical copies (project root and `flask_app/`), since the Web App runs as a separate project. Any bugfix has to be applied to both.
 - **Per-session knowledge bases grow unbounded**: each Web App browser session gets its own ChromaDB collection now (fixing the old cross-session data leak), but nothing currently expires or cleans up old sessions' collections — over time, many one-off visitors each uploading documents would leave behind a lot of small, never-revisited collections on disk. Fine for a portfolio demo; a production version would want some kind of session expiry/cleanup job.
-- **No automated tests**: refactors currently rely on manual testing rather than a test suite.
+- **Test coverage is unit-level only, not end-to-end**: `tests/` covers `aria_core`'s own logic (chunking, injection detection, persona handling, RAG/tool orchestration) with Groq/ChromaDB/the embedding model mocked out — it doesn't cover the Flask routes, the GUI, or a real integration run against the actual Groq API. Good for catching regressions in ARIA's own code; it won't catch a Groq API contract change or a real network/auth issue.
 - **Fixed-duration voice recording**: CLI/GUI voice input always records for a flat 5 seconds regardless of how long the person actually speaks.
 - **Tool calling adds latency and API usage**: since tools are on by default, every message pays for an extra non-streamed "decision" round-trip to Groq before the real answer streams — noticeable but usually small given Groq's speed. `web_search` is also limited to DuckDuckGo's free Instant Answer API, which only reliably covers factual/definitional queries; toggle tools off for pure chit-chat if you'd rather skip the extra round-trip, or if you're hitting Groq's rate limits.
+- **`llama-3.3-70b-versatile` occasionally malforms a tool call**: instead of returning a proper structured tool request, it sometimes emits one as literal text (e.g. `<function=web_search {"query": "..."}></function>`), which Groq's API rejects with a 400 `tool_use_failed` error. `chat_stream()` catches this and falls back to answering that turn without tools rather than crashing the reply, but it does mean the tool silently didn't run for that message — if answers about current events seem to be using stale training knowledge instead of a fresh search, this is likely why.
