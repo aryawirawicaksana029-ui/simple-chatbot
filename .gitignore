@@ -3,3 +3,4 @@ __pycache__/
 knowledge_base/
 chat_history/
 *.db
+.env

@@ -168,7 +168,7 @@ def main():
             continue
 
         if user_input.lower() == "voice":
-            filepath = record_audio(duration=5.0)
+            filepath = record_audio()
             try:
                 transcribed = aria.transcribe_audio(filepath)
             except Exception as e:

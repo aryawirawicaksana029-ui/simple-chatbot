@@ -1,0 +1,28 @@
+# Secrets — never bake these into an image layer
+config.py
+flask_app/config.py
+.env
+
+# Generated / runtime data — should come from a volume, not be baked in
+knowledge_base/
+flask_app/knowledge_base/
+chat_history/
+*.db
+flask_app/*.db
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Not needed inside the Web App image (CLI/GUI-only files, tests, VCS, docs)
+.git/
+.gitignore
+tests/
+chatbot.py
+chatbot_gui.py
+voice_input.py
+voice_output.py
+requirements.txt
+README.md
+*.md

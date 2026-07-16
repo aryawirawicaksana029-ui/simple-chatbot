@@ -1,6 +1,7 @@
 groq
 sounddevice
 scipy
+numpy
 pyttsx3
 chromadb
 sentence-transformers

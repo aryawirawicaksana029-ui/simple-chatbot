@@ -331,14 +331,14 @@ class AriaGUI:
 
         self.is_recording = True
         self.mic_btn.configure(state="disabled", text="⏺")
-        self._append_system("🎙️ Merekam suara selama 5 detik... silakan bicara!")
+        self._append_system("🎙️ Mendengarkan... silakan bicara! (berhenti otomatis begitu kamu diam)")
 
         threading.Thread(target=self._record_and_transcribe, daemon=True).start()
 
     def _record_and_transcribe(self):
         import os
         try:
-            filepath = record_audio(duration=5.0)
+            filepath = record_audio()
             text = self.aria.transcribe_audio(filepath)
             os.remove(filepath)
             self.root.after(0, self._on_voice_transcribed, text, None)

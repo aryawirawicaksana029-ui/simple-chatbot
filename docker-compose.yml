@@ -1,0 +1,42 @@
+# docker-compose.yml
+# Local/dev convenience: `docker compose up --build` builds the image and
+# runs it with your .env values and persistent storage already wired up.
+#
+# Setup:
+#   1. cp .env.example .env
+#   2. Fill in GROQ_API_KEY (and optionally FLASK_SECRET_KEY) in .env
+#   3. docker compose up --build
+#   4. Open http://localhost:5000
+#
+# Named volumes below solve the exact problem this project ran into on
+# Render/Railway's free tiers: their container disk gets wiped on every
+# redeploy, so the SQLite chat history and ChromaDB knowledge base didn't
+# actually survive a redeploy there. A Docker named volume persists on the
+# host across `docker compose down`/`up` (and container restarts/redeploys
+# on any Docker-based host that mounts volumes the same way), so this is
+# the setup where that persistence work actually pays off fully.
+
+services:
+  aria-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Switch to requirements-deploy.txt here (and set ENABLE_RAG=false
+        # below) for a smaller image on a low-RAM host.
+        REQUIREMENTS_FILE: requirements.txt
+    ports:
+      - "5000:5000"
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-dev-secret-change-me}
+      ENABLE_RAG: ${ENABLE_RAG:-true}
+      ARIA_DB_PATH: /app/flask_app/data/aria_chat.db
+    volumes:
+      - aria_knowledge_base:/app/flask_app/knowledge_base
+      - aria_data:/app/flask_app/data
+    restart: unless-stopped
+
+volumes:
+  aria_knowledge_base:
+  aria_data:

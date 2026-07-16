@@ -83,6 +83,7 @@ A browser-based chat page styled like a terminal window:
 | Libraries | `groq`, `tkinter` (built-in), `flask`, `requests` (web search tool) |
 | Frontend (Web) | HTML, CSS, vanilla JavaScript (fetch API + ReadableStream), `marked` (Markdown rendering), `DOMPurify` (HTML sanitization) |
 | Interface | Terminal (CLI), Desktop GUI (Tkinter), Web App (Flask) |
+| Containerization | Docker + Docker Compose (Web App only) |
 
 ---
 
@@ -152,7 +153,7 @@ Then open **http://127.0.0.1:5000** in your browser.
 | `save` / `save json` | Save conversation to `chat_history/` as `.txt` or `.json` |
 | `persona` | List available personas |
 | `persona <name>` | Switch persona (`default`, `formal`, `santai`, `sarcastic`, `mentor`, or any custom text) |
-| `voice` | Record 5 seconds of audio and transcribe it as your message |
+| `voice` | Record a spoken message (stops automatically once you go quiet) and transcribe it |
 | `speak on` / `speak off` | Toggle Aria reading her replies aloud (offline, via pyttsx3) |
 | `rag add <filepath>` | Add a `.txt`/`.pdf`/`.docx` file to Aria's knowledge base |
 | `rag on` / `rag off` | Toggle whether Aria uses the knowledge base to answer |
@@ -168,7 +169,7 @@ Then open **http://127.0.0.1:5000** in your browser.
 | Enter / Send button | Send message to Aria |
 | Persona dropdown | Switch Aria's personality on the fly |
 | 💾 Save button | Save conversation as `.txt` or `.json` via a file dialog |
-| 🎤 Mic button | Record 5 seconds of audio, transcribe it into the entry box (review before sending) |
+| 🎤 Mic button | Record a spoken message (stops automatically once you go quiet), transcribe it into the entry box (review before sending) |
 | 🔇/🔊 Speak button | Toggle Aria reading her replies aloud (offline, via pyttsx3) |
 | 📎 Add Doc button | Upload a `.txt`/`.pdf`/`.docx` file to the knowledge base via a file dialog |
 | 📚 RAG button | Toggle whether Aria uses the knowledge base to answer |
@@ -213,7 +214,7 @@ The core chat logic lives in `chatbot_core.py` and is shared by the CLI and GUI 
 - **GUI** streams chunks from a background thread into the Tkinter text widget via `root.after()`, so the window never freezes and text appears to "type itself."
 - **Web App** streams the reply over a chunked HTTP response; the frontend reads it with `ReadableStream` and fills in the chat bubble live, with a blinking cursor while Aria is still "typing." Each browser also gets its own session (via a session cookie), so multiple people can chat with Aria at the same time without mixing up each other's conversation history.
 
-**Voice input** works the same way conceptually across all three: record audio → send it to Groq's Whisper model (`whisper-large-v3`) via `transcribe_audio()` → get text back → treat it exactly like a typed message. The CLI/GUI record from the system mic with `sounddevice`; the Web App records in the browser with the `MediaRecorder` API and POSTs the audio blob to a `/transcribe` endpoint.
+**Voice input** works the same way conceptually across all three: record audio → send it to Groq's Whisper model (`whisper-large-v3`) via `transcribe_audio()` → get text back → treat it exactly like a typed message. The CLI/GUI record from the system mic with `sounddevice`, using simple RMS-amplitude voice activity detection (`voice_input.py`) to start immediately and stop automatically once you've spoken and then gone quiet — rather than always recording for a fixed duration regardless of how long the message actually was. The Web App instead records in the browser with the `MediaRecorder` API (manual start/stop via the mic button) and POSTs the audio blob to a `/transcribe` endpoint.
 
 **Voice output** deliberately uses two different engines depending on environment: the Web App speaks replies with the browser's built-in `speechSynthesis` (free, client-side, zero extra dependencies), while the CLI and GUI — which have no browser — use `pyttsx3`, an offline Python TTS engine, so neither needs an API call or an internet connection to talk back.
 
@@ -232,6 +233,10 @@ The core chat logic lives in `chatbot_core.py` and is shared by the CLI and GUI 
 ```
 simple-chatbot/
 │
+├── Dockerfile                  # Web App image (built from project root — needs aria_core/ + flask_app/)
+├── .dockerignore
+├── docker-compose.yml          # local dev: build + run + persistent volumes in one command
+├── .env.example                # copy to .env for docker-compose (GROQ_API_KEY, FLASK_SECRET_KEY, ENABLE_RAG)
 ├── aria_core/                 # Shared package — imported by ALL THREE interfaces, one copy of each file
 │   ├── __init__.py             # explains how flask_app/ reaches this package (sys.path)
 │   ├── chatbot_core.py         # Groq client, history, chat_stream(), RAG/tools orchestration
@@ -245,7 +250,7 @@ simple-chatbot/
 │   ├── test_rag_utils.py       # chunking, injection detection, KnowledgeBase isolation
 │   ├── test_tools_utils.py     # calculator safety, web search (mocked network)
 │   └── test_chatbot_core.py    # persona, history, RAG context injection, tool-call orchestration
-├── requirements.txt           # groq, sounddevice, scipy, pyttsx3, chromadb, sentence-transformers, pypdf, python-docx
+├── requirements.txt           # groq, sounddevice, scipy, numpy, pyttsx3, chromadb, sentence-transformers, pypdf, python-docx
 ├── flask_app/                 # Web App version (Flask) — a separate project one directory down
 │   ├── app.py                  # Flask routes; appends the project root to sys.path so it can `import aria_core`
 │   ├── db_utils.py             # SQLite persistence for conversation history + session settings (Web-App-only, not shared)
@@ -278,6 +283,39 @@ python -m unittest discover -s tests -v
 ```
 
 The tests mock out Groq, ChromaDB, and the embedding model, so they run in well under a second and need no API key, no network access, and no model download — what's under test is ARIA's own orchestration logic (does `chat_stream()` build the right messages? does a flagged RAG chunk add the security warning? does a malformed tool-call response get caught instead of crashing the reply?), not whether Groq or ChromaDB themselves work correctly.
+
+---
+
+## 🐳 Docker (Web App)
+
+A `Dockerfile` and `docker-compose.yml` at the project root package the Web App for portable, consistent deployment on any Docker-capable host (a VPS, DigitalOcean, a bare-metal server, or a PaaS that accepts a Dockerfile instead of its own buildpack) — this is what "portable across providers" means here: skip the platform-specific quirks and card-verification friction described in the Deployment section below, and get the same container everywhere.
+
+**Quick start with Docker Compose (recommended for local use):**
+```bash
+cp .env.example .env
+# edit .env and fill in GROQ_API_KEY
+
+docker compose up --build
+```
+Open `http://localhost:5000`. Compose also wires up two named volumes (`aria_knowledge_base`, `aria_data`) so the RAG knowledge base and SQLite chat history survive `docker compose down` / container restarts — this is the setup where the persistence work described earlier actually holds up across restarts, unlike the free tiers in the Deployment section below, whose disks get wiped on every redeploy.
+
+**Plain Docker, without Compose:**
+```bash
+docker build -t aria-web .
+docker run -p 5000:5000 -e GROQ_API_KEY=your_key_here aria-web
+```
+
+**Lean image (skip RAG's heavy dependencies)** — same tradeoff as `requirements-deploy.txt` in the Deployment section, now as a build arg:
+```bash
+docker build -t aria-web-lean --build-arg REQUIREMENTS_FILE=requirements-deploy.txt .
+docker run -p 5000:5000 -e GROQ_API_KEY=your_key_here -e ENABLE_RAG=false aria-web-lean
+```
+
+**Notes:**
+- The image is built from the **project root** (not from inside `flask_app/`), since it needs both `aria_core/` and `flask_app/` — the same reason `app.py` appends the project root to `sys.path` at runtime.
+- `sentence-transformers` pulls in `torch`; the Dockerfile explicitly installs the CPU-only build (a few hundred MB) instead of letting pip resolve the default CUDA/GPU build (multiple GB) that this container has no use for.
+- This is a single-stage build, not a multi-stage one — simpler to read and modify at the cost of a somewhat larger final image (build tools like `build-essential` stay in the image rather than being discarded after the `pip install` step). A multi-stage build would trim that, at the cost of being harder to follow; left as a possible future refinement rather than done now.
+- CLI/GUI aren't containerized — they're desktop apps that want a real display and microphone, which doesn't map cleanly onto a container.
 
 ---
 
@@ -356,8 +394,8 @@ On a deployed instance, the API key instead comes from the `GROQ_API_KEY` enviro
 - [x] Refactor `chatbot_core.py` / `rag_utils.py` into a shared package instead of duplicated copies
 - [x] Unit tests for core chat and RAG logic
 - [x] Deployment guide so the Web App is reachable beyond localhost (Render)
-- [ ] Dockerize the project (for more portable/consistent deployment across providers)
-- [ ] Voice activity detection for voice input (instead of a fixed 5-second recording)
+- [x] Dockerize the project (for more portable/consistent deployment across providers)
+- [x] Voice activity detection for voice input (instead of a fixed 5-second recording)
 - [ ] "Regenerate response" button
 - [ ] Migrate off `llama-3.3-70b-versatile` (Groq announced deprecation June 17, 2026) to a currently-supported model
 
@@ -371,6 +409,6 @@ Honest notes on where this project currently falls short of production-ready, fo
 - **In-memory session cache, backed by SQLite**: the Flask app's `sessions` dict is still in-memory for speed, but every message, persona choice, and RAG toggle is also written to a local SQLite database (`db_utils.py`) and restored automatically the next time that session is accessed. This survives a Flask process crash/restart on the same machine. It does **not** survive a full container redeploy on free hosting tiers (Render/Railway typically wipe the disk on redeploy unless you attach a paid persistent volume) — for that, you'd need either a persistent disk add-on or an external managed database.
 - **Per-session knowledge bases grow unbounded**: each Web App browser session gets its own ChromaDB collection now (fixing the old cross-session data leak), but nothing currently expires or cleans up old sessions' collections — over time, many one-off visitors each uploading documents would leave behind a lot of small, never-revisited collections on disk. Fine for a portfolio demo; a production version would want some kind of session expiry/cleanup job.
 - **Test coverage is unit-level only, not end-to-end**: `tests/` covers `aria_core`'s own logic (chunking, injection detection, persona handling, RAG/tool orchestration) with Groq/ChromaDB/the embedding model mocked out — it doesn't cover the Flask routes, the GUI, or a real integration run against the actual Groq API. Good for catching regressions in ARIA's own code; it won't catch a Groq API contract change or a real network/auth issue.
-- **Fixed-duration voice recording**: CLI/GUI voice input always records for a flat 5 seconds regardless of how long the person actually speaks.
+- **VAD is amplitude-based, not ML-based**: CLI/GUI voice input now stops automatically based on a simple RMS-volume silence threshold rather than a fixed duration, but that means it can be thrown off by a noisy room (background noise never dips below the threshold, so it waits for `max_duration`) or a very quiet talker (speech never rises above the threshold, so it never "hears" them start). A proper ML-based VAD (e.g. Silero VAD) would be more robust, at the cost of another model dependency.
 - **Tool calling adds latency and API usage**: since tools are on by default, every message pays for an extra non-streamed "decision" round-trip to Groq before the real answer streams — noticeable but usually small given Groq's speed. `web_search` is also limited to DuckDuckGo's free Instant Answer API, which only reliably covers factual/definitional queries; toggle tools off for pure chit-chat if you'd rather skip the extra round-trip, or if you're hitting Groq's rate limits.
 - **`llama-3.3-70b-versatile` occasionally malforms a tool call**: instead of returning a proper structured tool request, it sometimes emits one as literal text (e.g. `<function=web_search {"query": "..."}></function>`), which Groq's API rejects with a 400 `tool_use_failed` error. `chat_stream()` catches this and falls back to answering that turn without tools rather than crashing the reply, but it does mean the tool silently didn't run for that message — if answers about current events seem to be using stale training knowledge instead of a fresh search, this is likely why.
