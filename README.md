@@ -1,6 +1,6 @@
 # 🤖 ARIA - AI Chatbot
 
-An AI Chatbot powered by **Groq API** and **LLaMA 3.3 70B** model. Fast, intelligent, and supports multi-turn conversations with memory.
+An AI Chatbot powered by **Groq API** and **LLaMA 3.3 70B** model. Fast, intelligent, and supports multi-turn conversations with memory
 
 Now available in three versions:
 - 🖥️ **Terminal (CLI)** version
