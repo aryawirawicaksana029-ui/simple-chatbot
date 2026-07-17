@@ -24,6 +24,7 @@ Now available in three versions:
 - ✅ **Voice output** — Aria can read her replies aloud: browser `speechSynthesis` on the Web App, offline `pyttsx3` on CLI/GUI
 - ✅ **RAG (Retrieval Augmented Generation)** — upload `.txt`/`.pdf`/`.docx` documents to a shared knowledge base (ChromaDB + local `sentence-transformers` embeddings); toggle it on to have Aria answer using your documents as context, with citations showing exactly which document(s) an answer drew from
 - ✅ **Tool calling (calculator + web search)** — Aria can call a safe calculator and a free web search tool mid-conversation when a question calls for it, and shows exactly which tool ran and with what arguments
+- ✅ **Regenerate response** — not happy with a reply? Discard it and get a fresh one for the same message, across all three interfaces
 - ✅ Supports any language including Bahasa Indonesia
 - ✅ Clear conversation history (`clear` command / "Clear Chat" button)
 - ✅ Clean terminal interface, a desktop GUI (Tkinter), **and** a browser-based Web App (Flask)
@@ -160,6 +161,7 @@ Then open **http://127.0.0.1:5000** in your browser.
 | `rag list` | List documents currently in the knowledge base |
 | `rag clear` | Wipe the entire knowledge base |
 | `tools on` / `tools off` | Toggle calculator + web search tool calling (on by default) |
+| `regenerate` | Discard Aria's last reply and get a fresh one for the same message |
 | `quit` / `exit` | Exit the chatbot |
 
 ## 🖱️ Controls (GUI)
@@ -174,6 +176,7 @@ Then open **http://127.0.0.1:5000** in your browser.
 | 📎 Add Doc button | Upload a `.txt`/`.pdf`/`.docx` file to the knowledge base via a file dialog |
 | 📚 RAG button | Toggle whether Aria uses the knowledge base to answer |
 | 🛠️ Tools button | Toggle calculator + web search tool calling (on by default) |
+| 🔄 Regenerate button | Discard Aria's last reply and get a fresh one for the same message |
 | Clear Chat button | Clear conversation history and chat log |
 
 ## 🌐 Controls (Web App)
@@ -188,6 +191,7 @@ Then open **http://127.0.0.1:5000** in your browser.
 | 📎 upload button | Upload a `.txt`/`.pdf`/`.docx` file to the shared knowledge base |
 | 📚 rag button | Toggle whether Aria uses the knowledge base for your session |
 | 🛠️ tools button | Toggle calculator + web search tool calling for your session |
+| 🔄 regenerate button | Discard Aria's last reply and get a fresh one for the same message |
 | clear button | Clear conversation history for your browser session |
 
 ---
@@ -225,6 +229,8 @@ The core chat logic lives in `chatbot_core.py` and is shared by the CLI and GUI 
 **Markdown rendering (Web App only)**: while Aria's reply is still streaming in, the chat bubble shows plain text with a blinking cursor — trying to render Markdown on a half-finished response is unreliable (an unclosed ` ``` ` code fence, for instance, looks broken until the rest of the text arrives). Once the stream finishes, the full text is run through [marked](https://github.com/markedjs/marked) to convert Markdown into HTML, then through [DOMPurify](https://github.com/cure53/DOMPurify) to strip anything unsafe before it's inserted into the page — the same defense-in-depth instinct as the RAG prompt-injection handling: don't trust text that ends up in the DOM, even if it's "just" the model's own reply, since it could echo something adversarial from an uploaded document. This is Web-App-only; the CLI and GUI aren't a natural fit for rendered Markdown (a terminal and a Tkinter text widget don't have an HTML renderer to hand off to), so they continue to show Aria's replies as plain text.
 
 **Tool calling** gives Aria two abilities beyond plain chat: a `calculator` (safe arithmetic, evaluated via Python's `ast` module rather than `eval()` — no way for a crafted expression to run arbitrary code) and `web_search` (DuckDuckGo's free Instant Answer API, no API key needed, though it only reliably answers factual/definitional queries and often comes back empty for news or highly specific lookups). The flow is a **non-streamed decision round, then a streamed final answer**: Aria first asks Groq (without streaming) whether a tool is needed for this message; deciding needs the complete tool name and JSON arguments in one piece, which streaming would fragment across many chunks for little benefit here. If a tool is called, it runs locally, its result is added to the conversation, and only *then* does the final, tool-informed reply stream to the UI as usual. Tool calling only does one round per turn — no chained/recursive tool use — to keep the flow easy to follow. Like RAG's citations, which tool ran (and with what arguments) is shown directly in the UI rather than relying on the model to mention it, and it's on by default since both tools are safe/read-only; toggle it off if you'd rather avoid the extra round-trip latency it adds to every message.
+
+**Regenerate** discards Aria's last reply and asks for a fresh one to the *same* last user message — a reroll, not a new turn in the conversation. Under the hood, `chat_stream()` was split into a thin wrapper that appends the new user message, and a shared `_generate_reply()` that does the actual RAG/tool/streaming work assuming history already ends with the message to answer; `regenerate_last_response()` just pops the previous assistant reply (if there is one) and calls that same shared method again, so regenerating gets identical RAG/tool/citation behavior to a normal turn; `conversation_history` stays the same length either way; it doesn't grow. Each interface also removes the old reply from view before streaming the new one in: the CLI just prints the fresh reply below (a terminal can't un-print old text), the GUI tracks exactly where the last reply starts/ends in the Tkinter `Text` widget and deletes that span, and the Web App removes the corresponding message bubble(s) — including its citation/tool notes — from the DOM.
 
 ---
 
@@ -396,7 +402,7 @@ On a deployed instance, the API key instead comes from the `GROQ_API_KEY` enviro
 - [x] Deployment guide so the Web App is reachable beyond localhost (Render)
 - [x] Dockerize the project (for more portable/consistent deployment across providers)
 - [x] Voice activity detection for voice input (instead of a fixed 5-second recording)
-- [ ] "Regenerate response" button
+- [x] "Regenerate response" button
 - [ ] Migrate off `llama-3.3-70b-versatile` (Groq announced deprecation June 17, 2026) to a currently-supported model
 
 ---

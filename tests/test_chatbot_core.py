@@ -290,5 +290,67 @@ class TestRAGGuards(unittest.TestCase):
         aria.clear_kb()  # should not raise
 
 
+class TestRegenerateLastResponse(unittest.TestCase):
+    def test_raises_on_empty_history(self):
+        aria, _ = _make_aria()
+        with self.assertRaises(RuntimeError):
+            list(aria.regenerate_last_response())
+
+    def test_replaces_last_assistant_reply_without_growing_history(self):
+        aria, mock_client = _make_aria()
+        aria.disable_tools()
+        aria.disable_rag()
+
+        mock_client.chat.completions.create.return_value = _fake_streamed_response("Jawaban pertama.")
+        list(aria.chat_stream("Halo Aria"))
+        self.assertEqual(len(aria.conversation_history), 2)
+        self.assertEqual(aria.conversation_history[-1]["content"], "Jawaban pertama.")
+
+        mock_client.chat.completions.create.return_value = _fake_streamed_response("Jawaban kedua, beda dari yang pertama.")
+        new_reply = "".join(aria.regenerate_last_response())
+
+        self.assertEqual(new_reply, "Jawaban kedua, beda dari yang pertama.")
+        # Still exactly one user + one assistant message — regenerating
+        # replaces the reply, it doesn't append a third entry.
+        self.assertEqual(len(aria.conversation_history), 2)
+        self.assertEqual(aria.conversation_history[0], {"role": "user", "content": "Halo Aria"})
+        self.assertEqual(aria.conversation_history[-1]["content"], "Jawaban kedua, beda dari yang pertama.")
+
+    def test_regenerates_using_the_same_original_user_message(self):
+        """Regenerating must ask the same question again, not something else —
+        this is what makes it a 'reroll', not a new turn in the conversation."""
+        aria, mock_client = _make_aria()
+        aria.disable_tools()
+        aria.kb = MagicMock()
+        aria.kb.query.return_value = []
+        aria.rag_enabled = True
+
+        mock_client.chat.completions.create.return_value = _fake_streamed_response("ok")
+        list(aria.chat_stream("berapa hasil dari 6 kali 7?"))
+
+        mock_client.chat.completions.create.return_value = _fake_streamed_response("ok lagi")
+        list(aria.regenerate_last_response())
+
+        # kb.query should have been called with the original user message
+        # both times — once for the first answer, once for the regeneration.
+        for call in aria.kb.query.call_args_list:
+            self.assertEqual(call.args[0], "berapa hasil dari 6 kali 7?")
+
+    def test_works_even_if_history_ends_with_unanswered_user_message(self):
+        """If the previous attempt never got an assistant reply appended
+        (e.g. it crashed mid-stream), there's nothing to pop — regenerate
+        should just answer the pending user message rather than raising."""
+        aria, mock_client = _make_aria()
+        aria.disable_tools()
+        aria.disable_rag()
+        aria.conversation_history = [{"role": "user", "content": "pesan yang belum terjawab"}]
+
+        mock_client.chat.completions.create.return_value = _fake_streamed_response("akhirnya terjawab")
+        reply = "".join(aria.regenerate_last_response())
+
+        self.assertEqual(reply, "akhirnya terjawab")
+        self.assertEqual(len(aria.conversation_history), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

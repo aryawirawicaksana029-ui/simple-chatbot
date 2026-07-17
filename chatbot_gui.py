@@ -44,6 +44,8 @@ class AriaGUI:
         self.speak_enabled = False  # toggled via the 🔇/🔊 Speak button
         self.rag_enabled = False    # toggled via the RAG button
         self.tools_enabled = True   # mirrors AriaChatbot's default (tools on by default)
+        self._last_aria_start = None  # Text widget index where the most recent Aria reply begins
+        self._last_aria_end = None    # ...and where it ends — both needed to remove it on regenerate
 
         self._build_ui()
 
@@ -75,6 +77,14 @@ class AriaGUI:
             cursor="hand2"
         )
         clear_btn.pack(side="right")
+
+        self.regenerate_btn = tk.Button(
+            header, text="🔄 Regenerate", command=self.regenerate_message,
+            bg=BTN_COLOR, fg=TEXT_COLOR, font=FONT_MAIN,
+            activebackground=BTN_HOVER, relief="flat", padx=10, pady=3,
+            cursor="hand2"
+        )
+        self.regenerate_btn.pack(side="right", padx=(0, 8))
 
         save_btn = tk.Button(
             header, text="💾 Save", command=self.save_chat,
@@ -209,10 +219,53 @@ class AriaGUI:
         except Exception as e:
             self.root.after(0, self._finish_stream, str(e), full_reply)
 
+    def regenerate_message(self):
+        """Discards Aria's last reply (both from the visible log and from
+        her actual memory) and streams a fresh one for the same last user
+        message — a reroll, not a new question."""
+        if self.is_waiting:
+            return
+
+        if not self.aria.has_messages() or self._last_aria_start is None:
+            self._append_system("⚠️ Belum ada balasan Aria untuk di-generate ulang.")
+            return
+
+        # Remove the previous reply from the visible log before streaming
+        # a new one in — mirrors what regenerate_last_response() does to
+        # conversation_history under the hood.
+        self.chat_area.configure(state="normal")
+        self.chat_area.delete(self._last_aria_start, self._last_aria_end)
+        self.chat_area.configure(state="disabled")
+
+        self.is_waiting = True
+        self.send_btn.configure(state="disabled")
+        self.regenerate_btn.configure(state="disabled", text="...")
+        self._append_system("🔄 Meregenerasi ulang balasan...")
+
+        threading.Thread(target=self._stream_regenerate, daemon=True).start()
+
+    def _stream_regenerate(self):
+        started = False
+        full_reply = ""
+        try:
+            for chunk in self.aria.regenerate_last_response():
+                full_reply += chunk
+                if not started:
+                    self.root.after(0, self._start_aria_message)
+                    started = True
+                self.root.after(0, self._append_stream_chunk, chunk)
+            self.root.after(0, self._finish_stream, None, full_reply)
+        except Exception as e:
+            self.root.after(0, self._finish_stream, str(e), full_reply)
+
     def _start_aria_message(self):
         """Called once, right when the first chunk of Aria's reply arrives."""
         self._remove_last_system_line()
         self.chat_area.configure(state="normal")
+        # Remember exactly where this reply starts, so a later regenerate
+        # can delete precisely this block (and nothing else) before a new
+        # one is streamed in its place.
+        self._last_aria_start = self.chat_area.index(tk.END)
         self.chat_area.insert(tk.END, "Aria: ", "aria")
         self.chat_area.configure(state="disabled")
 
@@ -232,6 +285,7 @@ class AriaGUI:
         else:
             self.chat_area.configure(state="normal")
             self.chat_area.insert(tk.END, "\n\n")
+            self._last_aria_end = self.chat_area.index(tk.END)
             self.chat_area.configure(state="disabled")
             self.chat_area.see(tk.END)
 
@@ -254,6 +308,7 @@ class AriaGUI:
 
         self.is_waiting = False
         self.send_btn.configure(state="normal", text="Send")
+        self.regenerate_btn.configure(state="normal", text="🔄 Regenerate")
         self.entry.focus()
 
     def _remove_last_system_line(self):
@@ -372,6 +427,8 @@ class AriaGUI:
         self.chat_area.configure(state="normal")
         self.chat_area.delete("1.0", tk.END)
         self.chat_area.configure(state="disabled")
+        self._last_aria_start = None
+        self._last_aria_end = None
         self._append_system("✅ Riwayat percakapan sudah dihapus!")
 
     def save_chat(self):

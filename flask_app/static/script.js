@@ -3,6 +3,7 @@ const chatForm = document.getElementById("chat-form");
 const chatInput = document.getElementById("chat-input");
 const sendBtn = chatForm.querySelector(".send-btn");
 const clearBtn = document.getElementById("clear-btn");
+const regenerateBtn = document.getElementById("regenerate-btn");
 const saveBtn = document.getElementById("save-btn");
 const personaSelect = document.getElementById("persona-select");
 const micBtn = document.getElementById("mic-btn");
@@ -184,18 +185,24 @@ function _earliestMarkerIndex(text) {
   return indices.length ? Math.min(...indices) : -1;
 }
 
-async function sendMessage(message) {
-  setLoading(true);
+let lastAriaGroupNodes = []; // DOM nodes (.msg wrappers) belonging to the most recent Aria reply — the bubble itself plus any citation/tool notes — so regenerate can remove exactly this group and nothing else
 
+async function _streamAriaReply(url, requestBody) {
+  setLoading(true);
+  if (regenerateBtn) regenerateBtn.disabled = true;
+
+  const newGroupNodes = [];
   const bubble = createAriaStreamBubble();
+  newGroupNodes.push(bubble.closest(".msg"));
+
   let fullText = "";
   let sawError = false;
 
   try {
-    const res = await fetch("/chat", {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!res.ok) {
@@ -270,20 +277,46 @@ async function sendMessage(message) {
         if (t.name === "web_search") return `web_search("${t.arguments.query}")`;
         return t.name;
       });
-      appendMessage("system", `🛠️ Tools: ${parts.join(", ")}`);
+      const node = appendMessage("system", `🛠️ Tools: ${parts.join(", ")}`);
+      newGroupNodes.push(node.closest(".msg"));
     }
 
     if (citations && citations.length > 0) {
       const parts = citations.map((c) => `${c.source} (${c.chunks_used} bagian)`);
-      appendMessage("system", `📚 Sumber: ${parts.join(", ")}`);
+      const node = appendMessage("system", `📚 Sumber: ${parts.join(", ")}`);
+      newGroupNodes.push(node.closest(".msg"));
     }
+
+    // Only replace the tracked group once this attempt actually succeeded —
+    // a failed regenerate shouldn't wipe out what "last reply" refers to.
+    lastAriaGroupNodes = newGroupNodes;
   } catch (err) {
     bubble.closest(".msg").remove();
     appendMessage("error", "Tidak bisa menghubungi server. Cek koneksi/server Flask kamu.");
   } finally {
     setLoading(false);
+    if (regenerateBtn) regenerateBtn.disabled = false;
     chatInput.focus();
   }
+}
+
+async function sendMessage(message) {
+  await _streamAriaReply("/chat", { message });
+}
+
+async function regenerateLastReply() {
+  if (lastAriaGroupNodes.length === 0) {
+    appendMessage("system", "⚠️ Belum ada balasan Aria untuk di-generate ulang.");
+    return;
+  }
+
+  // Remove the previous reply (and its citation/tool notes) from view
+  // before streaming a new one in — mirrors what regenerate_last_response()
+  // does to conversation_history on the server.
+  lastAriaGroupNodes.forEach((node) => node.remove());
+  lastAriaGroupNodes = [];
+
+  await _streamAriaReply("/regenerate", {});
 }
 
 chatForm.addEventListener("submit", (e) => {
@@ -303,8 +336,13 @@ clearBtn.addEventListener("click", async () => {
     // Even if the server call fails, still clear the visible log locally.
   }
   chatLog.innerHTML = "";
+  lastAriaGroupNodes = [];
   appendMessage("system", "✅ Riwayat percakapan sudah dihapus!");
   chatInput.focus();
+});
+
+regenerateBtn.addEventListener("click", () => {
+  regenerateLastReply();
 });
 
 saveBtn.addEventListener("click", async () => {

@@ -25,16 +25,19 @@ def save_history_to_file(fmt: str = "txt") -> str:
     return aria.save_to_file(filepath, fmt=fmt)
 
 
-def handle_message(user_text: str):
+def _stream_and_display(reply_generator):
     """
-    Send `user_text` to Aria, stream the reply to the terminal as it
-    arrives, and optionally read it out loud afterwards if voice output
-    is enabled. Shared by both typed input and voice-transcribed input.
+    Shared by handle_message() and handle_regenerate(): streams whatever
+    generator it's given (either a new chat_stream() or a
+    regenerate_last_response()) to the terminal, then shows citations/tool
+    usage and speaks the reply if enabled — identical display logic either
+    way, since regenerating isn't a different kind of reply, just a fresh
+    one for the same question.
     """
     print("\nAria: ", end="", flush=True)
     full_reply = ""
     try:
-        for chunk in aria.chat_stream(user_text):
+        for chunk in reply_generator:
             print(chunk, end="", flush=True)
             full_reply += chunk
     except Exception as e:
@@ -57,6 +60,21 @@ def handle_message(user_text: str):
         voice_output.speak(full_reply)
 
 
+def handle_message(user_text: str):
+    """Send `user_text` to Aria and display the streamed reply. Shared by
+    both typed input and voice-transcribed input."""
+    _stream_and_display(aria.chat_stream(user_text))
+
+
+def handle_regenerate():
+    """Discard Aria's last reply and generate a fresh one for the same
+    last user message — a 'reroll', not a new question."""
+    try:
+        _stream_and_display(aria.regenerate_last_response())
+    except RuntimeError as e:
+        print(f"\n⚠️  {e}")
+
+
 def main():
     global speak_enabled
 
@@ -74,6 +92,7 @@ def main():
     print("  Type 'rag on' / 'rag off' to toggle whether Aria uses the knowledge base")
     print("  Type 'rag list' to see loaded documents, 'rag clear' to wipe the knowledge base")
     print("  Type 'tools on' / 'tools off' to toggle calculator + web search tools (on by default)")
+    print("  Type 'regenerate' to discard Aria's last reply and get a fresh one")
     print("=" * 45)
 
     while True:
@@ -89,6 +108,10 @@ def main():
         if user_input.lower() == "clear":
             aria.clear_history()
             print("\n✅ Conversation history cleared!")
+            continue
+
+        if user_input.lower() == "regenerate":
+            handle_regenerate()
             continue
 
         if user_input.lower() in ["save", "save json"]:

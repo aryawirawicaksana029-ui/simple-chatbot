@@ -150,6 +150,39 @@ class AriaChatbot:
             "role": "user",
             "content": user_message
         })
+        yield from self._generate_reply()
+
+    def regenerate_last_response(self):
+        """
+        Re-generates a reply for the same last user message, discarding
+        the previous assistant reply first — same RAG/tool behavior as a
+        normal turn, just a fresh roll of the model's response rather than
+        a new question. Yields chunks exactly like chat_stream().
+
+        Raises RuntimeError if there's no previous exchange to regenerate
+        (empty history, or the history doesn't actually end with a user
+        message once any prior assistant reply is removed).
+        """
+        if not self.conversation_history:
+            raise RuntimeError("No conversation yet — nothing to regenerate.")
+
+        if self.conversation_history[-1]["role"] == "assistant":
+            self.conversation_history.pop()
+
+        if not self.conversation_history or self.conversation_history[-1]["role"] != "user":
+            raise RuntimeError("No user message found to regenerate a response for.")
+
+        yield from self._generate_reply()
+
+    def _generate_reply(self):
+        """
+        Shared implementation behind chat_stream() and
+        regenerate_last_response(): assumes conversation_history already
+        ends with the user message to respond to (neither method appends
+        anything else beforehand), handles RAG context + tool calling, and
+        yields the streamed reply before appending it to history.
+        """
+        user_message = self.conversation_history[-1]["content"]
 
         messages = [{"role": "system", "content": self.system_prompt}]
         self.last_rag_sources = []  # reset each call; only populated if RAG actually contributes context

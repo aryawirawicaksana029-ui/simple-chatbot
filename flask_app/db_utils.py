@@ -96,6 +96,23 @@ def clear_messages(session_id: str):
         conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
 
 
+def delete_last_message(session_id: str):
+    """
+    Delete the single most recent message for this session. Used when
+    regenerating a reply: the old assistant message is removed from
+    persisted history right before the new one is appended, so SQLite
+    stays consistent with AriaChatbot.regenerate_last_response(), which
+    does the same thing to conversation_history in memory.
+    """
+    with _get_conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT 1",
+            (session_id,)
+        ).fetchone()
+        if row is not None:
+            conn.execute("DELETE FROM messages WHERE id = ?", (row[0],))
+
+
 # ---------- Per-session settings (persona, RAG toggle) ----------
 
 def load_settings(session_id: str) -> dict:

@@ -154,7 +154,44 @@ def chat():
     return Response(stream_with_context(generate()), mimetype="text/plain")
 
 
-@app.route("/rag/upload", methods=["POST"])
+@app.route("/regenerate", methods=["POST"])
+def regenerate():
+    """
+    Discards Aria's last reply and streams a fresh one for the same last
+    user message — same streaming/citations/tools/error-marker protocol as
+    /chat, since from the frontend's perspective this is the same kind of
+    response, just triggered differently (no new user message to echo).
+    """
+    aria = get_chatbot()
+    session_id = session["session_id"]
+
+    def generate():
+        full_reply = ""
+        try:
+            # Keep SQLite in sync with what regenerate_last_response() is
+            # about to do to conversation_history: drop the old assistant
+            # reply before the new one is generated and persisted.
+            db_utils.delete_last_message(session_id)
+
+            for chunk in aria.regenerate_last_response():
+                full_reply += chunk
+                yield chunk
+
+            db_utils.append_message(session_id, "assistant", full_reply)
+
+            citations = aria.get_rag_citations()
+            if citations:
+                yield f"{STREAM_CITATIONS_PREFIX}{json.dumps(citations)}"
+
+            tool_calls = aria.get_tool_usage()
+            if tool_calls:
+                yield f"{STREAM_TOOLS_PREFIX}{json.dumps(tool_calls)}"
+        except RuntimeError as e:
+            yield f"{STREAM_ERROR_PREFIX}{e}"
+        except Exception as e:
+            yield f"{STREAM_ERROR_PREFIX}Failed to reach Groq API: {e}"
+
+    return Response(stream_with_context(generate()), mimetype="text/plain")
 def rag_upload():
     """Upload a .txt/.pdf/.docx file and add it to the shared knowledge base."""
     if not RAG_AVAILABLE:
