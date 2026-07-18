@@ -1,6 +1,6 @@
 # 🤖 ARIA - AI Chatbot
 
-An AI Chatbot powered by **Groq API** and **LLaMA 3.3 70B** model. Fast, intelligent, and supports multi-turn conversations with memory
+An AI Chatbot powered by **Groq API** and **GPT-OSS 120B** model. Fast, intelligent, and supports multi-turn conversations with memory.
 
 Now available in three versions:
 - 🖥️ **Terminal (CLI)** version
@@ -15,7 +15,7 @@ Now available in three versions:
 
 ## 🚀 Features
 
-- ✅ Powered by LLaMA 3.3 70B via Groq API (ultra-fast inference)
+- ✅ Powered by GPT-OSS 120B via Groq API (ultra-fast inference)
 - ✅ Multi-turn conversation with memory (remembers context)
 - ✅ **Streaming responses** — Aria's reply appears word by word in real time, ChatGPT-style, across all three interfaces
 - ✅ **Save conversation history to file** — export as a readable `.txt` transcript or structured `.json`, from every interface
@@ -79,7 +79,7 @@ A browser-based chat page styled like a terminal window:
 | Component | Technology |
 |-----------|-----------|
 | Language | Python 3.x |
-| AI Model | LLaMA 3.3 70B (via Groq) |
+| AI Model | GPT-OSS 120B (via Groq), configurable via `ARIA_MODEL_NAME` env var |
 | API | Groq API (free tier), streaming responses |
 | Libraries | `groq`, `tkinter` (built-in), `flask`, `requests` (web search tool) |
 | Frontend (Web) | HTML, CSS, vanilla JavaScript (fetch API + ReadableStream), `marked` (Markdown rendering), `DOMPurify` (HTML sanitization) |
@@ -203,7 +203,7 @@ User Input
     ↓
 Add to Conversation History
     ↓
-Send to Groq API (LLaMA 3.3 70B, stream=True)
+Send to Groq API (GPT-OSS 120B, stream=True)
     ↓
 Receive response as a stream of chunks
     ↓
@@ -403,7 +403,7 @@ On a deployed instance, the API key instead comes from the `GROQ_API_KEY` enviro
 - [x] Dockerize the project (for more portable/consistent deployment across providers)
 - [x] Voice activity detection for voice input (instead of a fixed 5-second recording)
 - [x] "Regenerate response" button
-- [ ] Migrate off `llama-3.3-70b-versatile` (Groq announced deprecation June 17, 2026) to a currently-supported model
+- [x] Migrate off `llama-3.3-70b-versatile` (Groq announced deprecation June 17, 2026) to a currently-supported model
 
 ---
 
@@ -417,4 +417,4 @@ Honest notes on where this project currently falls short of production-ready, fo
 - **Test coverage is unit-level only, not end-to-end**: `tests/` covers `aria_core`'s own logic (chunking, injection detection, persona handling, RAG/tool orchestration) with Groq/ChromaDB/the embedding model mocked out — it doesn't cover the Flask routes, the GUI, or a real integration run against the actual Groq API. Good for catching regressions in ARIA's own code; it won't catch a Groq API contract change or a real network/auth issue.
 - **VAD is amplitude-based, not ML-based**: CLI/GUI voice input now stops automatically based on a simple RMS-volume silence threshold rather than a fixed duration, but that means it can be thrown off by a noisy room (background noise never dips below the threshold, so it waits for `max_duration`) or a very quiet talker (speech never rises above the threshold, so it never "hears" them start). A proper ML-based VAD (e.g. Silero VAD) would be more robust, at the cost of another model dependency.
 - **Tool calling adds latency and API usage**: since tools are on by default, every message pays for an extra non-streamed "decision" round-trip to Groq before the real answer streams — noticeable but usually small given Groq's speed. `web_search` is also limited to DuckDuckGo's free Instant Answer API, which only reliably covers factual/definitional queries; toggle tools off for pure chit-chat if you'd rather skip the extra round-trip, or if you're hitting Groq's rate limits.
-- **`llama-3.3-70b-versatile` occasionally malforms a tool call**: instead of returning a proper structured tool request, it sometimes emits one as literal text (e.g. `<function=web_search {"query": "..."}></function>`), which Groq's API rejects with a 400 `tool_use_failed` error. `chat_stream()` catches this and falls back to answering that turn without tools rather than crashing the reply, but it does mean the tool silently didn't run for that message — if answers about current events seem to be using stale training knowledge instead of a fresh search, this is likely why.
+- **A model can still malform a tool call**: rarely, the model returns a tool-call attempt as literal text (e.g. `<function=web_search {"query": "..."}></function>`) instead of a proper structured response, which Groq's API rejects with a 400 `tool_use_failed` error. `chat_stream()` catches this and falls back to answering that turn without tools rather than crashing the reply — this was first observed on the now-retired `llama-3.3-70b-versatile` and the fallback is kept as general-purpose defensive handling regardless of which model is configured, since no model is guaranteed immune to it. If answers about current events seem to be using stale training knowledge instead of a fresh search, this is a likely reason.

@@ -1,6 +1,6 @@
 """
 chatbot_core.py
-Core logic for ARIA chatbot (Groq + LLaMA 3.3 70B).
+Core logic for ARIA chatbot (Groq + GPT-OSS 120B).
 Shared by all three interfaces: the CLI (chatbot.py), the GUI
 (chatbot_gui.py), and the Web App (flask_app/app.py) — this used to be two
 separate, hand-synced copies (see aria_core/__init__.py for why that changed).
@@ -42,7 +42,12 @@ SYSTEM_PROMPT = (
     "You are friendly, smart, and concise."
 )
 
-MODEL_NAME = "llama-3.3-70b-versatile"
+# llama-3.3-70b-versatile (the model this project used originally) is being
+# shut down by Groq on 08/16/26; openai/gpt-oss-120b is Groq's recommended
+# replacement (the other option being qwen/qwen3.6-27b). Configurable via
+# env var so the *next* time Groq deprecates a model, updating this doesn't
+# require a code change — just export ARIA_MODEL_NAME=whatever-the-new-one-is.
+MODEL_NAME = os.environ.get("ARIA_MODEL_NAME", "openai/gpt-oss-120b")
 WHISPER_MODEL = "whisper-large-v3"  # Groq's hosted speech-to-text model
 
 # Preset personas. Each value is the system prompt used to steer Aria's style.
