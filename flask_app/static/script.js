@@ -22,7 +22,9 @@ let speakEnabled = false;
 
 speakToggleBtn.addEventListener("click", () => {
   speakEnabled = !speakEnabled;
-  speakToggleBtn.textContent = speakEnabled ? "🔊 speak" : "🔇 speak";
+  speakToggleBtn.classList.toggle("is-on", speakEnabled);
+  speakToggleBtn.querySelector(".tool-icon").textContent = speakEnabled ? "🔊" : "🔇";
+  speakToggleBtn.querySelector(".tool-state").textContent = speakEnabled ? "On" : "Off";
   if (!speakEnabled) {
     window.speechSynthesis.cancel(); // stop mid-sentence if turned off
   }
@@ -109,9 +111,14 @@ function appendMessage(role, text) {
   const msg = document.createElement("div");
   msg.className = `msg msg-${role}`;
 
-  const label = document.createElement("span");
-  label.className = "msg-label";
-  label.textContent = role === "user" ? "you" : role === "aria" ? "aria" : role;
+  // User and Aria bubbles get an avatar chip, like a chat app. System/error
+  // notices stay avatar-less, centered pills (they're not "said" by anyone).
+  if (role === "user" || role === "aria") {
+    const avatar = document.createElement("div");
+    avatar.className = "msg-avatar";
+    avatar.textContent = role === "user" ? "🧑" : "🤖";
+    msg.appendChild(avatar);
+  }
 
   // Aria's replies get rendered as Markdown (code blocks, lists, bold, etc.),
   // so the body needs to be a <div> — a <p> can't legally contain block-level
@@ -120,7 +127,6 @@ function appendMessage(role, text) {
   body.className = "msg-body";
   body.textContent = text;
 
-  msg.appendChild(label);
   msg.appendChild(body);
   chatLog.appendChild(msg);
   scrollToBottom();
@@ -161,10 +167,55 @@ function renderMarkdown(text) {
   return DOMPurify.sanitize(rawHtml);
 }
 
+// Wraps every <pre><code> block Aria's Markdown produced with a small header
+// bar (language + Copy button), similar to a code editor pane. Runs once,
+// after the full reply has rendered — not during streaming.
+function enhanceCodeBlocks(body) {
+  body.querySelectorAll("pre").forEach((pre) => {
+    if (pre.parentElement.classList.contains("code-block")) return; // already enhanced
+
+    const code = pre.querySelector("code");
+    const langMatch = code && code.className.match(/language-(\w+)/);
+    const lang = langMatch ? langMatch[1] : "text";
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "code-block";
+
+    const bar = document.createElement("div");
+    bar.className = "code-block-bar";
+
+    const langLabel = document.createElement("span");
+    langLabel.className = "code-block-lang";
+    langLabel.textContent = lang;
+
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "code-copy-btn";
+    copyBtn.textContent = "Copy";
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(code ? code.textContent : pre.textContent);
+        copyBtn.textContent = "Copied!";
+      } catch (err) {
+        copyBtn.textContent = "Gagal";
+      }
+      setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
+    });
+
+    bar.appendChild(langLabel);
+    bar.appendChild(copyBtn);
+
+    pre.parentNode.insertBefore(wrapper, pre);
+    wrapper.appendChild(bar);
+    wrapper.appendChild(pre);
+  });
+}
+
 function finalizeAriaStreamBubble(body, text) {
   const html = renderMarkdown(text);
   if (html !== null) {
     body.innerHTML = html;
+    enhanceCodeBlocks(body);
   } else {
     body.textContent = text;
   }
@@ -377,6 +428,37 @@ saveBtn.addEventListener("click", async () => {
 
 chatInput.focus();
 
+// ---------- Mobile sidebar toggle ----------
+// The sidebar (persona, tools, save/clear) slides in as an overlay on small
+// screens instead of taking up permanent width — see the max-width: 860px
+// rule in style.css. Desktop layouts never add this class, so the sidebar
+// just stays put there.
+const appShell = document.querySelector(".app");
+const sidebarToggleBtn = document.getElementById("sidebar-toggle-btn");
+const sidebarBackdrop = document.getElementById("sidebar-backdrop");
+
+function closeSidebar() {
+  appShell.classList.remove("sidebar-open");
+}
+
+if (sidebarToggleBtn) {
+  sidebarToggleBtn.addEventListener("click", () => {
+    appShell.classList.toggle("sidebar-open");
+  });
+}
+
+if (sidebarBackdrop) {
+  sidebarBackdrop.addEventListener("click", closeSidebar);
+}
+
+// Picking a persona, clearing, etc. should also close the overlay on mobile
+// so the person immediately sees the chat area respond to their tap.
+document.querySelectorAll(".tool-item, .new-chat-btn, .persona-select").forEach((el) => {
+  el.addEventListener("click", () => {
+    if (window.innerWidth <= 860) closeSidebar();
+  });
+});
+
 // ---------- Feature flags from the server ----------
 // Some deployments (e.g. low-memory free hosting tiers) disable RAG entirely
 // to save RAM, since even loading the embedding model costs a few hundred MB
@@ -431,7 +513,8 @@ toolsToggleBtn.addEventListener("click", async () => {
     appendMessage("error", "Gagal menghubungi server untuk toggle tools.");
     toolsEnabled = !toolsEnabled; // revert on failure
   }
-  toolsToggleBtn.textContent = toolsEnabled ? "🛠️ tools: on" : "🛠️ tools: off";
+  toolsToggleBtn.classList.toggle("is-on", toolsEnabled);
+  toolsToggleBtn.querySelector(".tool-state").textContent = toolsEnabled ? "On" : "Off";
   appendMessage("system", `🛠️ Tool calling (calculator + web search) ${toolsEnabled ? "diaktifkan" : "dimatikan"}.`);
 });
 
@@ -452,7 +535,8 @@ ragToggleBtn.addEventListener("click", async () => {
     appendMessage("error", "Gagal menghubungi server untuk toggle RAG.");
     ragEnabled = !ragEnabled; // revert on failure
   }
-  ragToggleBtn.textContent = ragEnabled ? "📚 rag: on" : "📚 rag";
+  ragToggleBtn.classList.toggle("is-on", ragEnabled);
+  ragToggleBtn.querySelector(".tool-state").textContent = ragEnabled ? "On" : "Off";
   appendMessage("system", `📚 Knowledge base ${ragEnabled ? "diaktifkan" : "dimatikan"}.`);
 });
 
