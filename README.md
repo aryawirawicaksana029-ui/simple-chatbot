@@ -11,7 +11,7 @@ Now available in three versions:
 
 ## 📸 Preview on GIFT
 
-<img width="800" height="450" alt="ezgif com-video-to-gif-converter" src="https://github.com/user-attachments/assets/59abb093-5404-43e1-9b59-ddcb969bdd4d" />
+<img width="800" height="450" alt="ezgif com-video-to-gif-converter" src="https://github.com/user-attachments/assets/60ce641e-3d02-4ed0-ab02-1e2fac4363cc" />
 
 ## 🚀 Features
 
